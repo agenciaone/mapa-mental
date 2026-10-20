@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Mapas Mentais</title>
+  <meta name="description" content="Crie mapas mentais offline, direto no navegador.">
+  <meta name="theme-color" content="#0e8a7e">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 000 12h3"/></symbol>
+    <symbol id="i-child" viewBox="0 0 24 24"><rect x="2.5" y="8.5" width="8" height="7" rx="2"/><path d="M10.5 12h3c1.5 0 2-1 2-2.5V7.5M15.5 12v4.5"/><path d="M18 5v5M15.5 7.5h5"/><path d="M15.5 16.5h5"/></symbol>
+    <symbol id="i-sibling" viewBox="0 0 24 24"><rect x="5" y="3" width="11" height="6" rx="2"/><rect x="5" y="15" width="11" height="6" rx="2" stroke-dasharray="2.5 2"/><path d="M19 15v6M16 18h6"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+    <symbol id="i-layout" viewBox="0 0 24 24"><circle cx="5" cy="12" r="2.5"/><path d="M7.5 12h3M10.5 6v12M10.5 6h3M10.5 12h3M10.5 18h3"/><rect x="14" y="4" width="7" height="4" rx="1.5"/><rect x="14" y="10" width="7" height="4" rx="1.5"/><rect x="14" y="16" width="7" height="4" rx="1.5"/></symbol>
+    <symbol id="i-magnet" viewBox="0 0 24 24"><path d="M6 4v8a6 6 0 0012 0V4h-4v8a2 2 0 01-4 0V4z"/><path d="M6 8h4M14 8h4"/></symbol>
+    <symbol id="i-collapse" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M8.5 12h7"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M8.5 12h7M12 8.5v7"/></symbol>
+    <symbol id="i-zoom-in" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5M8.5 11h5M11 8.5v5"/></symbol>
+    <symbol id="i-zoom-out" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5M8.5 11h5"/></symbol>
+    <symbol id="i-center" viewBox="0 0 24 24"><path d="M4 9V5a1 1 0 011-1h4M15 4h4a1 1 0 011 1v4M20 15v4a1 1 0 01-1 1h-4M9 20H5a1 1 0 01-1-1v-4"/><circle cx="12" cy="12" r="2.5"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/></symbol>
+    <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 15V3M7.5 7.5L12 3l4.5 4.5"/><path d="M5 13v6a2 2 0 002 2h10a2 2 0 002-2v-6"/></symbol>
+    <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3v12M7.5 10.5L12 15l4.5-4.5"/><path d="M5 13v6a2 2 0 002 2h10a2 2 0 002-2v-6"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18.5" cy="12" r="1.3"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.9-7.5-9.5V6z"/><path d="M8.8 12l2.2 2.2 4.2-4.4"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M7.5 14h9"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 100 18c1.2 0 1.8-.8 1.8-1.7 0-1.3-1-1.5-1-2.6 0-.9.7-1.6 1.6-1.6H17a4 4 0 004-4C21 6.6 17 3 12 3z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10.5" cy="7" r="1.2"/><circle cx="15" cy="7.5" r="1.2"/></symbol>
+    <symbol id="i-open" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v4a2 2 0 01-2 2H6a2 2 0 01-2-2V8a2 2 0 012-2h4"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></symbol>
+    <symbol id="i-print" viewBox="0 0 24 24"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/></symbol>
+    <symbol id="i-logo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><circle cx="4.5" cy="6" r="1.8"/><circle cx="19.5" cy="6" r="1.8"/><circle cx="4.5" cy="18" r="1.8"/><circle cx="19.5" cy="18" r="1.8"/><path d="M9.4 10.2L6 7.2M14.6 10.2l3.4-3M9.4 13.8L6 16.8M14.6 13.8l3.4 3"/></symbol>
+  </defs>
+</svg>
+
+<div id="app">
+  <header class="topbar" role="toolbar" aria-label="Barra de ferramentas">
+    <button class="btn icon" id="btnMenu" title="Meus mapas" aria-label="Meus mapas"><svg class="ic"><use href="#i-menu"/></svg></button>
+    <div class="brand" aria-hidden="true"><svg class="ic"><use href="#i-logo"/></svg></div>
+    <input id="mapName" class="map-name" maxlength="120" aria-label="Nome do mapa" spellcheck="false">
+    <span id="saveStatus" class="save-status" aria-live="polite"></span>
+
+    <div class="tb-group">
+      <button class="btn icon" id="btnUndo" title="Desfazer (Ctrl+Z)" aria-label="Desfazer"><svg class="ic"><use href="#i-undo"/></svg></button>
+      <button class="btn icon" id="btnRedo" title="Refazer (Ctrl+Y)" aria-label="Refazer"><svg class="ic"><use href="#i-redo"/></svg></button>
+    </div>
+    <div class="tb-group">
+      <button class="btn icon" id="btnAddChild" title="Novo subtópico (Tab)" aria-label="Novo subtópico"><svg class="ic"><use href="#i-child"/></svg></button>
+      <button class="btn icon" id="btnAddSibling" title="Novo tópico irmão (Enter)" aria-label="Novo tópico irmão"><svg class="ic"><use href="#i-sibling"/></svg></button>
+      <button class="btn icon" id="btnDelete" title="Excluir tópico (Delete)" aria-label="Excluir tópico"><svg class="ic"><use href="#i-trash"/></svg></button>
+    </div>
+    <div class="tb-group">
+      <button class="btn icon" id="btnLayout" title="Reorganizar tópico selecionado e subtópicos (Ctrl+L)" aria-label="Reorganizar"><svg class="ic"><use href="#i-layout"/></svg></button>
+      <button class="btn icon toggle-btn" id="btnAuto" title="Organização automática" aria-label="Organização automática" aria-pressed="false"><svg class="ic"><use href="#i-magnet"/></svg></button>
+    </div>
+    <div class="spacer"></div>
+    <div class="tb-group">
+      <button class="btn icon" id="btnZoomOut" title="Diminuir zoom (-)" aria-label="Diminuir zoom"><svg class="ic"><use href="#i-zoom-out"/></svg></button>
+      <button class="btn zoom-label" id="btnZoomReset" title="Zoom 100%">100%</button>
+      <button class="btn icon" id="btnZoomIn" title="Aumentar zoom (+)" aria-label="Aumentar zoom"><svg class="ic"><use href="#i-zoom-in"/></svg></button>
+      <button class="btn icon" id="btnFit" title="Centralizar mapa (Ctrl+0)" aria-label="Centralizar mapa"><svg class="ic"><use href="#i-center"/></svg></button>
+    </div>
+    <div class="tb-group">
+      <button class="btn icon" id="btnTheme" title="Tema claro/escuro" aria-label="Alternar tema"><svg class="ic"><use href="#i-moon"/></svg></button>
+      <button class="btn icon" id="btnInspector" title="Painel de estilo" aria-label="Painel de estilo"><svg class="ic"><use href="#i-palette"/></svg></button>
+      <button class="btn primary" id="btnExport" title="Exportar PDF / PNG"><svg class="ic"><use href="#i-export"/></svg><span class="lbl">Exportar</span></button>
+      <div class="menu-wrap">
+        <button class="btn icon" id="btnMore" title="Mais opções" aria-label="Mais opções" aria-haspopup="menu" aria-expanded="false"><svg class="ic"><use href="#i-more"/></svg></button>
+        <div class="menu" id="moreMenu" role="menu" hidden>
+          <button role="menuitem" data-cmd="exportJson"><svg class="ic"><use href="#i-file"/></svg>Exportar mapa (JSON)</button>
+          <button role="menuitem" data-cmd="importJson"><svg class="ic"><use href="#i-import"/></svg>Importar mapa (JSON)</button>
+          <button role="menuitem" data-cmd="exportSvg"><svg class="ic"><use href="#i-export"/></svg>Exportar imagem SVG</button>
+          <hr>
+          <button role="menuitem" data-cmd="backups"><svg class="ic"><use href="#i-shield"/></svg>Cópias de segurança</button>
+          <button role="menuitem" data-cmd="expandAll"><svg class="ic"><use href="#i-expand"/></svg>Expandir tudo</button>
+          <button role="menuitem" data-cmd="collapseAll"><svg class="ic"><use href="#i-collapse"/></svg>Recolher tudo</button>
+          <button role="menuitem" data-cmd="layoutAll"><svg class="ic"><use href="#i-layout"/></svg>Reorganizar mapa inteiro</button>
+          <hr>
+          <button role="menuitem" data-cmd="shortcuts"><svg class="ic"><use href="#i-keyboard"/></svg>Atalhos de teclado</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside id="drawer" class="drawer" aria-label="Meus mapas">
+      <div class="panel-head">
+        <h2>Meus mapas</h2>
+        <button class="btn icon" id="btnDrawerClose" aria-label="Fechar"><svg class="ic"><use href="#i-close"/></svg></button>
+      </div>
+      <div class="drawer-actions">
+        <button class="btn primary" id="btnNewMap"><svg class="ic"><use href="#i-plus"/></svg>Novo mapa</button>
+        <button class="btn" id="btnImport"><svg class="ic"><use href="#i-import"/></svg>Importar</button>
+      </div>
+      <label class="search"><svg class="ic"><use href="#i-search"/></svg><input id="mapSearch" type="search" placeholder="Buscar mapas" aria-label="Buscar mapas"></label>
+      <ul id="mapList" class="map-list"></ul>
+      <div class="drawer-foot">
+        <button class="btn block" id="btnBackups"><svg class="ic"><use href="#i-shield"/></svg>Cópias de segurança</button>
+        <p class="muted small" id="storageInfo"></p>
+      </div>
+    </aside>
+
+    <div id="canvasWrap" class="canvas-wrap">
+      <svg id="canvas" tabindex="0" aria-label="Área do mapa mental" role="application">
+        <g id="viewport"></g>
+      </svg>
+      <textarea id="editor" class="editor" hidden spellcheck="true" aria-label="Editar texto do tópico"></textarea>
+      <div id="dropHint" class="drop-hint" hidden>Solte para tornar subtópico</div>
+    </div>
+
+    <aside id="inspector" class="inspector" aria-label="Estilo do tópico">
+      <div class="panel-head">
+        <h2 id="inspTitle">Tópico</h2>
+        <button class="btn icon" id="btnInspClose" aria-label="Fechar painel"><svg class="ic"><use href="#i-close"/></svg></button>
+      </div>
+      <div id="inspEmpty" class="insp-empty">
+        <p>Selecione um tópico para alterar forma, cores, texto, notas e links.</p>
+        <p class="muted small">Dica: clique duas vezes num tópico para editar o texto.</p>
+      </div>
+      <div id="inspBody" class="insp-body" hidden>
+        <section>
+          <h3>Forma</h3>
+          <div class="shape-grid" id="shapeGrid"></div>
+        </section>
+        <section>
+          <h3>Cores</h3>
+          <div class="color-row"><span>Preenchimento</span><div class="swatches" data-prop="fill"></div></div>
+          <div class="color-row"><span>Texto</span><div class="swatches" data-prop="textColor"></div></div>
+          <div class="color-row"><span>Ramificação</span><div class="swatches" data-prop="branch"></div></div>
+        </section>
+        <section>
+          <h3>Texto</h3>
+          <div class="row">
+            <select id="fontSize" aria-label="Tamanho do texto"></select>
+            <button class="btn seg" id="btnBold" aria-pressed="false" title="Negrito"><b>N</b></button>
+            <button class="btn seg" id="btnItalic" aria-pressed="false" title="Itálico"><i>I</i></button>
+          </div>
+        </section>
+        <section>
+          <h3>Borda</h3>
+          <div class="segmented" id="borderSeg">
+            <button class="btn seg" data-border="">Padrão</button>
+            <button class="btn seg" data-border="solid">Contínua</button>
+            <button class="btn seg" data-border="dashed">Tracejada</button>
+            <button class="btn seg" data-border="dotted">Pontilhada</button>
+            <button class="btn seg" data-border="none">Nenhuma</button>
+          </div>
+        </section>
+        <section>
+          <h3><label for="noteInput">Nota</label></h3>
+          <textarea id="noteInput" rows="4" placeholder="Escreva uma nota para este tópico"></textarea>
+        </section>
+        <section>
+          <h3><label for="linkInput">Link</label></h3>
+          <div class="row">
+            <input id="linkInput" type="url" placeholder="https://..." autocomplete="off">
+            <button class="btn icon" id="btnOpenLink" title="Abrir link" aria-label="Abrir link"><svg class="ic"><use href="#i-open"/></svg></button>
+          </div>
+          <p class="error small" id="linkError" hidden>Link inválido. Use http, https, mailto ou tel.</p>
+        </section>
+        <section class="insp-actions">
+          <button class="btn" id="iAddChild"><svg class="ic"><use href="#i-child"/></svg>Subtópico</button>
+          <button class="btn" id="iAddSibling"><svg class="ic"><use href="#i-sibling"/></svg>Irmão</button>
+          <button class="btn" id="iCollapse"><svg class="ic"><use href="#i-collapse"/></svg><span>Recolher</span></button>
+          <button class="btn" id="iLayout"><svg class="ic"><use href="#i-layout"/></svg>Reorganizar</button>
+          <button class="btn" id="iDuplicate"><svg class="ic"><use href="#i-copy"/></svg>Duplicar</button>
+          <button class="btn" id="iResetStyle"><svg class="ic"><use href="#i-palette"/></svg>Limpar estilo</button>
+          <button class="btn danger" id="iDelete"><svg class="ic"><use href="#i-trash"/></svg>Excluir</button>
+        </section>
+      </div>
+    </aside>
+  </main>
+  <div id="scrim" class="scrim" hidden></div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<div id="printArea" class="print-area" aria-hidden="true"></div>
+
+<script src="js/util.js"></script>
+<script src="js/model.js"></script>
+<script src="js/layout.js"></script>
+<script src="js/render.js"></script>
+<script src="js/store.js"></script>
+<script src="js/export.js"></script>
+<script src="js/demo.js"></script>
+<script src="js/dialogs.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

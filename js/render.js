@@ -1,0 +1,236 @@
+'use strict';
+(function (MM) {
+  const { U, M, L } = MM;
+  const R = {};
+
+  R.PALETTE = ['#e8590c', '#1c7ed6', '#2f9e44', '#ae3ec9', '#e67700', '#d6336c', '#0c8599', '#6741d9'];
+
+  R.THEMES = {
+    light: {
+      name: 'light', bg: '#f5f6f8', text: '#1f2630', muted: '#8a94a3',
+      rootFill: '#253041', rootText: '#ffffff', accent: '#0e8a7e', drop: '#f08c00',
+      toggleBg: '#ffffff', toggleText: '#253041', tint: 0.84,
+    },
+    dark: {
+      name: 'dark', bg: '#14171c', text: '#e5e8ec', muted: '#7d8794',
+      rootFill: '#e5e8ec', rootText: '#14171c', accent: '#34d1bf', drop: '#ffc53d',
+      toggleBg: '#232830', toggleText: '#e5e8ec', tint: 0.74,
+    },
+  };
+
+  const ICONS = {
+    note: 'M3.5 2h6.5l3 3v9h-9.5z M10 2v3h3 M6 8h4.5 M6 11h4.5',
+    link: 'M6.6 9.4l2.8-2.8 M7.2 4.6l1.1-1.1a2.7 2.7 0 013.9 3.9L11.1 8.5 M8.8 11.4l-1.1 1.1a2.7 2.7 0 01-3.9-3.9L4.9 7.5',
+  };
+
+  R.branchColor = function (map, id, theme) {
+    let n = map.nodes[id];
+    while (n) {
+      if (n.style && n.style.branch) return n.style.branch;
+      if (!n.parent) return theme.rootFill;
+      const p = map.nodes[n.parent];
+      if (!p.parent) {
+        const i = Math.max(0, p.children.indexOf(n.id));
+        return R.PALETTE[i % R.PALETTE.length];
+      }
+      n = p;
+    }
+    return theme.text;
+  };
+
+  R.nextBranchColor = function (map) {
+    const used = new Map(R.PALETTE.map((c) => [c, 0]));
+    for (const c of map.nodes[map.rootId].children) {
+      const b = map.nodes[c].style.branch;
+      if (used.has(b)) used.set(b, used.get(b) + 1);
+    }
+    let best = R.PALETTE[0], min = Infinity;
+    for (const [c, k] of used) if (k < min) { min = k; best = c; }
+    return best;
+  };
+
+  /** Cores efetivas de um tópico conforme tema e estilo do usuário. */
+  R.colors = function (map, id, theme, box) {
+    const n = map.nodes[id];
+    const s = n.style || {};
+    const branch = R.branchColor(map, id, theme);
+    const flat = box.shape === 'underline' || box.shape === 'none';
+    let fill;
+    if (s.fill) fill = s.fill;
+    else if (flat) fill = 'none';
+    else if (box.depth === 0) fill = theme.rootFill;
+    else fill = U.mix(branch, theme.bg, Math.min(0.92, theme.tint + (box.depth > 1 ? 0.06 : 0)));
+    const text = s.textColor || (s.fill ? U.contrastText(s.fill) : box.depth === 0 ? theme.rootText : theme.text);
+    const border = s.border || (box.depth === 0 ? 'none' : box.shape === 'none' ? 'none' : 'solid');
+    const stroke = box.depth === 0 ? (s.branch || theme.text) : branch;
+    const strokeW = box.shape === 'underline' ? (box.depth <= 1 ? 3 : 2.2) : 2;
+    return { fill, text, border, stroke, strokeW, branch };
+  };
+
+  const dash = (b, w) => (b === 'dashed' ? `${w * 3},${w * 2.2}` : b === 'dotted' ? `0.1,${w * 2.2}` : null);
+
+  function edgeWidth(depth) { return depth <= 1 ? 3.2 : depth === 2 ? 2.2 : 1.6; }
+
+  function edgePath(map, pid, cid) {
+    const p = map.nodes[pid], c = map.nodes[cid];
+    const pb = L.box(map, pid), cb = L.box(map, cid);
+    const side = c.x >= p.x ? 1 : -1;
+    let sx = p.x + side * pb.w / 2, sy = p.y;
+    if (pb.depth === 0) sx = p.x + side * Math.max(0, pb.w / 2 - Math.min(pb.h / 2, 18));
+    else if (pb.shape === 'underline' || pb.shape === 'none') sy = p.y + pb.h / 2;
+    const ex = c.x - side * cb.w / 2;
+    const ey = (cb.shape === 'underline' || cb.shape === 'none') ? c.y + cb.h / 2 : c.y;
+    const dx = (ex - sx) * 0.55;
+    return `M${sx.toFixed(1)} ${sy.toFixed(1)}C${(sx + dx).toFixed(1)} ${sy.toFixed(1)} ${(ex - dx).toFixed(1)} ${ey.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`;
+  }
+
+  function shapeEl(b, col) {
+    const { w, h } = b;
+    const common = { fill: col.fill === 'none' ? 'transparent' : col.fill, class: 'shape' };
+    if (col.border !== 'none' && b.shape !== 'underline') {
+      common.stroke = col.stroke;
+      common['stroke-width'] = col.strokeW;
+      const d = dash(col.border, col.strokeW);
+      if (d) { common['stroke-dasharray'] = d; common['stroke-linecap'] = 'round'; }
+    }
+    switch (b.shape) {
+      case 'ellipse': return U.s('ellipse', Object.assign({ cx: w / 2, cy: h / 2, rx: w / 2, ry: h / 2 }, common));
+      case 'hexagon': {
+        const k = Math.min(h * 0.32, w / 4);
+        return U.s('polygon', Object.assign({ points: `${k},0 ${w - k},0 ${w},${h / 2} ${w - k},${h} ${k},${h} 0,${h / 2}` }, common));
+      }
+      case 'rect': return U.s('rect', Object.assign({ width: w, height: h, rx: 2 }, common));
+      case 'pill': return U.s('rect', Object.assign({ width: w, height: h, rx: h / 2 }, common));
+      case 'underline':
+      case 'none': return U.s('rect', Object.assign({ width: w, height: h, rx: 4 }, common));
+      default: return U.s('rect', Object.assign({ width: w, height: h, rx: Math.min(10, h / 3) }, common));
+    }
+  }
+
+  function toggleSide(map, id) {
+    const n = map.nodes[id];
+    const first = map.nodes[n.children[0]];
+    if (first && Math.abs(first.x - n.x) > 1) return first.x > n.x ? 1 : -1;
+    return M.side(map, id);
+  }
+
+  /**
+   * Desenha o mapa dentro de `target` (um <g>).
+   * opts: interactive, selectedId, dropId, draggingId, expandAll
+   */
+  R.draw = function (target, map, theme, opts) {
+    opts = opts || {};
+    while (target.firstChild) target.removeChild(target.firstChild);
+    const edges = U.s('g', { class: 'edges', fill: 'none', 'stroke-linecap': 'round' });
+    const nodes = U.s('g', { class: 'nodes' });
+    target.appendChild(edges);
+    target.appendChild(nodes);
+    const ids = M.visibleIds(map, opts.expandAll);
+    const dragSet = opts.draggingId ? new Set(M.subtreeIds(map, opts.draggingId)) : null;
+
+    for (const id of ids) {
+      const n = map.nodes[id];
+      if (!n.parent) continue;
+      const d = M.depth(map, id);
+      const p = U.s('path', {
+        d: edgePath(map, n.parent, id),
+        stroke: R.branchColor(map, id, theme),
+        'stroke-width': edgeWidth(d),
+      });
+      if (dragSet && dragSet.has(id)) p.setAttribute('opacity', '0.55');
+      edges.appendChild(p);
+    }
+
+    for (const id of ids) {
+      const n = map.nodes[id];
+      const b = L.box(map, id);
+      const col = R.colors(map, id, theme, b);
+      const g = U.s('g', { class: 'node', 'data-id': id, transform: `translate(${(n.x - b.w / 2).toFixed(1)},${(n.y - b.h / 2).toFixed(1)})` });
+      if (dragSet && dragSet.has(id)) g.setAttribute('opacity', '0.75');
+
+      if (opts.interactive && (id === opts.selectedId || id === opts.dropId)) {
+        const drop = id === opts.dropId;
+        g.appendChild(U.s('rect', {
+          class: 'sel', x: -5, y: -5, width: b.w + 10, height: b.h + 10, rx: 12,
+          fill: drop ? theme.drop : 'none', 'fill-opacity': drop ? 0.15 : null,
+          stroke: drop ? theme.drop : theme.accent, 'stroke-width': 2, 'stroke-dasharray': drop ? '5,4' : null,
+        }));
+      }
+
+      g.appendChild(shapeEl(b, col));
+      if (b.shape === 'underline' && col.border !== 'none') {
+        const line = U.s('line', { x1: 0, y1: b.h, x2: b.w, y2: b.h, stroke: col.stroke, 'stroke-width': col.strokeW, 'stroke-linecap': 'round' });
+        const d = dash(col.border, col.strokeW);
+        if (d) line.setAttribute('stroke-dasharray', d);
+        g.appendChild(line);
+      }
+
+      const contentW = b.textW + b.iconW;
+      const left = (b.w - contentW) / 2;
+      const top = (b.h - b.lines.length * b.lineH) / 2;
+      const text = U.s('text', {
+        'font-family': L.FONT, 'font-size': b.fontSize, fill: col.text, 'text-anchor': 'middle',
+        'font-weight': b.bold ? 700 : 400, 'font-style': b.italic ? 'italic' : null,
+      });
+      b.lines.forEach((line, i) => {
+        const t = U.s('tspan', { x: (left + b.textW / 2).toFixed(1), y: (top + i * b.lineH + b.lineH / 2 + b.fontSize * 0.35).toFixed(1) });
+        t.textContent = line || ' ';
+        text.appendChild(t);
+      });
+      g.appendChild(text);
+
+      let ix = left + b.textW + 6;
+      const iy = (b.h - b.iconSize) / 2;
+      for (const kind of ['note', 'link']) {
+        if (kind === 'note' && !n.note) continue;
+        if (kind === 'link' && !n.link) continue;
+        const ig = U.s('g', { class: 'ico', 'data-act': kind, transform: `translate(${ix.toFixed(1)},${iy.toFixed(1)}) scale(${(b.iconSize / 16).toFixed(3)})` });
+        ig.appendChild(U.s('rect', { width: 16, height: 16, fill: 'transparent' }));
+        ig.appendChild(U.s('path', { d: ICONS[kind], fill: 'none', stroke: col.text, 'stroke-width': 1.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+        if (opts.interactive) {
+          const title = U.s('title');
+          title.textContent = kind === 'note' ? n.note.slice(0, 400) : n.link;
+          ig.appendChild(title);
+        }
+        g.appendChild(ig);
+        ix += b.iconSize + 4;
+      }
+
+      if (n.parent && n.children.length && (opts.interactive || (n.collapsed && !opts.expandAll))) {
+        const side = toggleSide(map, id);
+        const cx = side > 0 ? b.w + 10 : -10;
+        const cy = (b.shape === 'underline' || b.shape === 'none') ? b.h : b.h / 2;
+        const collapsed = n.collapsed && !opts.expandAll;
+        const tg = U.s('g', { class: 'toggle' + (collapsed ? '' : ' open'), 'data-act': 'toggle' });
+        tg.appendChild(U.s('circle', { cx, cy, r: 9, fill: theme.toggleBg, stroke: col.branch, 'stroke-width': 1.6 }));
+        if (collapsed) {
+          const count = M.subtreeIds(map, id).length - 1;
+          const t = U.s('text', { x: cx, y: cy + 3.6, 'text-anchor': 'middle', 'font-size': count > 99 ? 7.5 : 10, 'font-weight': 700, 'font-family': L.FONT, fill: theme.toggleText });
+          t.textContent = count > 999 ? '999+' : String(count);
+          tg.appendChild(t);
+        } else {
+          tg.appendChild(U.s('line', { x1: cx - 4, y1: cy, x2: cx + 4, y2: cy, stroke: theme.toggleText, 'stroke-width': 1.8, 'stroke-linecap': 'round' }));
+        }
+        g.appendChild(tg);
+      }
+      nodes.appendChild(g);
+    }
+    return ids;
+  };
+
+  /** Área ocupada pelo desenho (inclui botões de recolher). */
+  R.contentBBox = function (map, expandAll) {
+    const ids = M.visibleIds(map, expandAll);
+    const b = L.bbox(map, ids);
+    const pad = 24;
+    return { x: b.x - pad, y: b.y - pad, w: b.w + pad * 2, h: b.h + pad * 2 };
+  };
+
+  R.minFontSize = function (map, expandAll) {
+    let min = Infinity;
+    for (const id of M.visibleIds(map, expandAll)) min = Math.min(min, L.box(map, id).fontSize);
+    return isFinite(min) ? min : 14;
+  };
+
+  MM.R = R;
+})(window.MM);
