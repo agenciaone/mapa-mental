@@ -42,6 +42,9 @@ Dê dois cliques em `index.html`. Tudo funciona, exceto a instalação como apli
 - Zoom (roda do mouse, pinça, + / −), mover a tela arrastando o fundo, centralizar (Ctrl+0).
 - Desfazer / refazer (Ctrl+Z / Ctrl+Y).
 - Painel de estilo: forma (7 opções), cor de preenchimento, cor do texto, cor da ramificação, tamanho do texto, negrito, itálico, borda.
+- Elementos visuais: cada tópico pode ter um emoji ou um ícone da biblioteca própria (WhatsApp, Instagram, e-mail, telefone, site, funil, proposta, contrato, pagamento etc.). Com o texto vazio, o tópico mostra só o elemento, em tamanho grande.
+- Fluxos com setas: as ligações pai → filho podem ter ponta de seta (simples ou dupla), rótulo (ex.: "resposta rápida") e linha tracejada ou pontilhada. Em ⋯ → "Setas em todas as ligações" o mapa inteiro vira um fluxo.
+- Conexões livres: botão "Conectar" (Ctrl+K) liga qualquer tópico a qualquer outro com uma seta extra, com rótulo, cor, curva e sentido ajustáveis. Clique na seta para editar; Delete exclui.
 - Notas e links por tópico (links aceitam apenas http, https, mailto e tel).
 - Temas claro e escuro.
 - Salvamento automático no dispositivo (IndexedDB, com localStorage como alternativa).
@@ -67,6 +70,7 @@ O PDF é gerado pelo próprio aplicativo, sem bibliotecas: o mapa é desenhado e
 index.html            página principal
 css/app.css           estilos (temas claro/escuro, responsivo, impressão)
 js/util.js            utilitários (ids, cores, downloads, links seguros)
+js/icons.js           biblioteca de ícones e emojis
 js/model.js           dados do mapa, histórico, validação de importação
 js/layout.js          medição de texto e organização automática
 js/render.js          desenho SVG dos tópicos e conexões

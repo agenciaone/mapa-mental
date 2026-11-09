@@ -71,20 +71,25 @@
     const n = map.nodes[id];
     const t = L.typo(map, id);
     const icons = (n.note ? 1 : 0) + (n.link ? 1 : 0);
-    const key = [n.text, t.shape, t.fontSize, t.bold, t.italic, t.depth === 0, icons].join('\u0001');
+    const element = n.icon && MM.ICONS[n.icon] ? 'icon' : n.emoji ? 'emoji' : null;
+    const key = [n.text, t.shape, t.fontSize, t.bold, t.italic, t.depth === 0, icons, element, n.emoji].join('\u0001');
     let g = cache.get(key);
     if (g) return g;
 
     const fs = t.fontSize;
     ctx.font = L.fontString(t);
     const maxW = t.depth === 0 ? 320 : Math.max(160, 230 + (fs - 14) * 8);
+    const elementOnly = !!element && !n.text.trim();
     const shown = n.text.trim() ? n.text : ' ';
-    const { lines, widest } = wrap(shown, maxW);
+    const wrapped = elementOnly ? { lines: [], widest: 0 } : wrap(shown, maxW);
+    const lines = wrapped.lines;
     const lineH = Math.round(fs * 1.3);
     const iconSize = Math.max(12, Math.round(fs * 0.85));
     const iconW = icons ? icons * (iconSize + 4) + 2 : 0;
-    const textW = Math.max(widest, n.text.trim() ? 0 : fs * 3);
-    const textH = lines.length * lineH;
+    const elSize = element ? Math.round(fs * (elementOnly ? 2.2 : 1.3)) : 0;
+    const elW = element ? elSize + (elementOnly ? 0 : 6) : 0;
+    const textW = elementOnly ? 0 : Math.max(wrapped.widest, n.text.trim() ? 0 : fs * 3);
+    const textH = Math.max(lines.length * lineH, elSize);
 
     let padX = Math.round(fs * 0.8) + 4;
     let padY = Math.round(fs * 0.4) + 3;
@@ -92,16 +97,28 @@
     if (t.shape === 'underline' || t.shape === 'none') { padX = 6; padY = 5; }
     if (t.shape === 'pill') padX += Math.round(lineH * 0.25);
 
-    let w = Math.ceil(textW + iconW + padX * 2);
+    let w = Math.ceil(textW + elW + iconW + padX * 2);
     let h = Math.ceil(textH + padY * 2);
     if (t.shape === 'ellipse') { w = Math.ceil(w * 1.22); h = Math.ceil(h * 1.32); }
     if (t.shape === 'hexagon') w = Math.ceil(w + h * 0.5);
     w = Math.max(w, 36);
 
-    g = { w, h, lines, lineH, fontSize: fs, bold: t.bold, italic: t.italic, shape: t.shape, depth: t.depth, iconSize, iconW, textW, icons };
+    g = { w, h, lines, lineH, fontSize: fs, bold: t.bold, italic: t.italic, shape: t.shape, depth: t.depth, iconSize, iconW, textW, icons, element, elementOnly, elSize, elW };
     if (cache.size > 4000) cache.clear();
     cache.set(key, g);
     return g;
+  };
+
+  L.LABEL_FONT = `600 12px ${L.FONT}`;
+  L.labelWidth = function (text) {
+    ctx.font = L.LABEL_FONT;
+    return ctx.measureText(text).width;
+  };
+
+  /** Distância horizontal entre pai e filho; cresce quando a seta tem rótulo. */
+  L.edgeGap = function (map, id) {
+    const e = map.nodes[id].edge;
+    return e && e.label ? Math.max(L.HGAP, L.labelWidth(e.label) * 1.2 + 70) : L.HGAP;
   };
 
   L.rect = function (map, id) {
@@ -134,7 +151,11 @@
   L.subtreeBBox = (map, id) => L.bbox(map, visibleSubtree(map, id));
 
   // ---------- organização em árvore ----------
-  function vgap(map, id) { return M.isRoot(map, map.nodes[id].parent) ? L.ROOT_VGAP : L.VGAP; }
+  function vgap(map, id) {
+    const n = map.nodes[id];
+    const base = M.isRoot(map, n.parent) ? L.ROOT_VGAP : L.VGAP;
+    return n.edge && n.edge.label ? base + 16 : base; // espaço para o rótulo da seta
+  }
 
   function blockH(map, id) {
     const n = map.nodes[id];
@@ -168,7 +189,7 @@
     kids.forEach((c, i) => {
       cy += gaps[i];
       const cw = L.box(map, c).w;
-      place(map, c, x + side * (pw / 2 + L.HGAP + cw / 2), cy + heights[i] / 2, side);
+      place(map, c, x + side * (pw / 2 + L.edgeGap(map, c) + cw / 2), cy + heights[i] / 2, side);
       cy += heights[i];
     });
   }
@@ -217,7 +238,7 @@
       side = M.side(map, p.id);
     }
     const same = sibs.filter((c) => (map.nodes[c].x >= p.x ? 1 : -1) === side);
-    n.x = p.x + side * (pb.w / 2 + L.HGAP + b.w / 2);
+    n.x = p.x + side * (pb.w / 2 + L.edgeGap(map, id) + b.w / 2);
     if (!same.length) {
       n.y = p.y;
     } else {
@@ -235,7 +256,7 @@
     const pb = L.box(map, p.id);
     const b = L.box(map, id);
     const r = L.subtreeBBox(map, refId);
-    n.x = p.x + side * (pb.w / 2 + L.HGAP + b.w / 2);
+    n.x = p.x + side * (pb.w / 2 + L.edgeGap(map, id) + b.w / 2);
     n.y = r.y + r.h + vgap(map, id) + b.h / 2;
   };
 

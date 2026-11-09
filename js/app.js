@@ -36,12 +36,23 @@
   function renderNow() {
     if (!S.map) return;
     if (S.sel && !S.map.nodes[S.sel]) S.sel = null;
+    if (S.selLink && !M.getLink(S.map, S.selLink)) S.selLink = null;
+    if (S.connect && !S.map.nodes[S.connect.from]) endConnect();
     R.draw(vp, S.map, theme(), {
       interactive: true,
       selectedId: S.sel,
+      selectedLink: S.selLink,
       dropId: S.drag && S.drag.dropId,
       draggingId: S.drag && S.drag.moved ? S.drag.id : null,
     });
+    if (S.connect && S.connect.pt) {
+      // prévia da seta enquanto se escolhe o destino
+      const n = S.map.nodes[S.connect.from];
+      vp.appendChild(U.s('path', {
+        d: `M${n.x} ${n.y}L${S.connect.pt.x} ${S.connect.pt.y}`, stroke: theme().accent,
+        'stroke-width': 2, 'stroke-dasharray': '6,5', fill: 'none', 'pointer-events': 'none',
+      }));
+    }
     if (S.sel) {
       const g = vp.querySelector(`.node[data-id="${S.sel}"]`);
       if (g) g.classList.add('selected');
@@ -174,7 +185,119 @@
 
   function select(id) {
     S.sel = id;
+    S.selLink = null;
     render();
+  }
+
+  function selectLink(id) {
+    S.selLink = id;
+    S.sel = null;
+    render();
+  }
+
+  // ---------- conexões livres (setas entre quaisquer tópicos) ----------
+  function startConnect() {
+    if (!S.map) return;
+    if (S.editing) commitEdit();
+    const from = S.sel || (S.selLink && M.getLink(S.map, S.selLink).to);
+    if (!from) { D.toast('Selecione o tópico de origem da seta.'); return; }
+    S.connect = { from, pt: null };
+    svg.classList.add('connecting');
+    $('connectHint').hidden = false;
+    $('btnConnect').setAttribute('aria-pressed', 'true');
+  }
+
+  function endConnect() {
+    S.connect = null;
+    svg.classList.remove('connecting');
+    $('connectHint').hidden = true;
+    $('btnConnect').setAttribute('aria-pressed', 'false');
+    render();
+  }
+
+  function finishConnect(to) {
+    const from = S.connect.from;
+    endConnect();
+    if (!to || to === from) return;
+    const l = change(() => M.addLink(S.map, from, to) || false);
+    if (!l) { D.toast('Esses tópicos já estão conectados nessa direção.'); return; }
+    selectLink(l.id);
+    openInspector(true);
+    renderNow();
+    setTimeout(() => $('linkLabelInput').focus(), 60);
+  }
+
+  /** Começa a escrever o rótulo da seta selecionada pelo painel. */
+  function typeLinkLabel(initial) {
+    openInspector(true);
+    renderNow();
+    const inp = $('linkLabelInput');
+    if (initial != null) inp.value = initial;
+    inp.focus();
+    if (initial == null) inp.select();
+  }
+
+  function setLink(prop, value) {
+    const l = S.selLink && M.getLink(S.map, S.selLink);
+    if (!l || l[prop] === value) return;
+    change(() => { l[prop] = value; });
+  }
+
+  function reverseLink() {
+    const l = S.selLink && M.getLink(S.map, S.selLink);
+    if (!l) return;
+    if (S.map.links.some((x) => x.from === l.to && x.to === l.from)) { D.toast('Já existe uma seta no sentido contrário.'); return; }
+    change(() => { [l.from, l.to] = [l.to, l.from]; });
+  }
+
+  function deleteLink() {
+    if (!S.selLink) return;
+    const id = S.selLink;
+    change(() => M.removeLink(S.map, id));
+    S.selLink = null;
+    render();
+  }
+
+  async function promptLinkLabel(id) {
+    const l = M.getLink(S.map, id);
+    if (!l) return;
+    const v = await D.prompt('Rótulo da seta', l.label, { label: 'Texto sobre a seta (deixe vazio para remover)', okLabel: 'Salvar', allowEmpty: true });
+    if (v === null) return;
+    setLink('label', v.slice(0, M.LIMITS.label));
+  }
+
+  // ---------- seta entre pai e filho ----------
+  function setEdge(id, prop, value) {
+    const n = S.map.nodes[id];
+    if (!n || !n.parent) return;
+    const cur = (n.edge || {})[prop] || '';
+    if (cur === (value || '')) return;
+    change(() => {
+      const oldGap = L.edgeGap(S.map, id);
+      n.edge = Object.assign({}, n.edge);
+      if (value) n.edge[prop] = value; else delete n.edge[prop];
+      const dx = L.edgeGap(S.map, id) - oldGap;
+      // abre espaço para o rótulo sem reorganizar o resto do mapa
+      if (dx && !S.map.autoLayout) M.moveSubtree(S.map, id, M.side(S.map, id) * dx, 0);
+    });
+  }
+
+  async function promptEdgeLabel(id) {
+    const n = S.map.nodes[id];
+    if (!n || !n.parent) return;
+    const v = await D.prompt('Rótulo da seta', (n.edge && n.edge.label) || '', { label: 'Texto sobre a seta (deixe vazio para remover)', okLabel: 'Salvar', allowEmpty: true });
+    if (v === null) return;
+    setEdge(id, 'label', v.slice(0, M.LIMITS.label));
+  }
+
+  // ---------- emoji / ícone do tópico ----------
+  function setElement(kind, value) {
+    const n = S.sel && S.map.nodes[S.sel];
+    if (!n) return;
+    const emoji = kind === 'emoji' ? M.cleanEmoji(value) : '';
+    const icon = kind === 'icon' && MM.ICONS[value] ? value : '';
+    if (n.emoji === emoji && n.icon === icon) return;
+    change(() => keepAnchor(n.id, () => { n.emoji = emoji; n.icon = icon; }));
   }
 
   function addChild() {
@@ -214,6 +337,7 @@
   }
 
   function deleteSelected() {
+    if (S.map && S.selLink) { deleteLink(); return; }
     if (!S.map || !S.sel) return;
     if (M.isRoot(S.map, S.sel)) { D.toast('O tópico central não pode ser excluído.'); return; }
     const n = S.map.nodes[S.sel];
@@ -388,7 +512,8 @@
     const n = S.map.nodes[ed.id];
     if (!n) return;
     let text = editor.value.replace(/\r/g, '').replace(/^\s+|\s+$/g, '').slice(0, M.LIMITS.text);
-    if (!text) text = ed.original || NEW_TEXT;
+    // sem texto, o tópico mostra só o emoji/ícone; sem elemento, volta ao texto anterior
+    if (!text && !n.emoji && !n.icon) text = ed.original || NEW_TEXT;
     if (text !== n.text) {
       const doIt = () => keepAnchor(n.id, () => { n.text = text; });
       if (ed.fresh) { doIt(); afterChange(); } // texto de um tópico recém-criado não gera passo extra
@@ -461,6 +586,19 @@
     if (e.pointerType === 'mouse' && e.button !== 0) return;
 
     const nodeEl = e.target.closest && e.target.closest('.node');
+    if (S.connect) {
+      S.pointers.delete(e.pointerId);
+      finishConnect(nodeEl ? nodeEl.getAttribute('data-id') : null);
+      return;
+    }
+    const linkEl = !nodeEl && e.target.closest('[data-link]');
+    const edgeEl = !nodeEl && !linkEl && e.target.closest('[data-edge]');
+    if (linkEl || edgeEl) {
+      const id = (linkEl || edgeEl).getAttribute(linkEl ? 'data-link' : 'data-edge');
+      S.tap = { key: (linkEl ? 'link:' : 'edge:') + id, kind: linkEl ? 'link' : 'edge', id };
+      if (linkEl) selectLink(id); else select(id);
+      return;
+    }
     if (nodeEl) {
       const id = nodeEl.getAttribute('data-id');
       const actEl = e.target.closest('[data-act]');
@@ -474,7 +612,10 @@
   });
 
   svg.addEventListener('pointermove', (e) => {
-    if (!S.pointers.has(e.pointerId)) return;
+    if (!S.pointers.has(e.pointerId)) {
+      if (S.connect) { S.connect.pt = toWorld(e.clientX, e.clientY); render(); }
+      return;
+    }
     S.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
     if (S.pinch && S.pointers.size >= 2) {
@@ -553,6 +694,18 @@
       if (S.pointers.size < 2) { S.pinch = null; saveViewSoon(); }
       return;
     }
+    if (S.tap) {
+      const t = S.tap;
+      S.tap = null;
+      const now = performance.now();
+      if (e.type !== 'pointercancel' && S.lastTap.id === t.key && now - S.lastTap.t < 420) {
+        S.lastTap = { id: null, t: 0 };
+        if (t.kind === 'link') promptLinkLabel(t.id); else promptEdgeLabel(t.id);
+      } else {
+        S.lastTap = { id: t.key, t: now };
+      }
+      return;
+    }
     const d = S.drag;
     if (d) {
       if (d.moved) { endDrag(e.type === 'pointercancel'); return; }
@@ -575,7 +728,7 @@
       S.pan = null;
       svg.classList.remove('panning');
       if (p.moved) saveViewSoon();
-      else if (S.sel) select(null);
+      else if (S.sel || S.selLink) select(null);
     }
   }
   svg.addEventListener('pointerup', onPointerEnd);
@@ -608,6 +761,7 @@
     const k = e.key;
 
     if (e.key === 'Escape') {
+      if (S.connect) { endConnect(); return; }
       if (!$('moreMenu').hidden) { closeMenus(); return; }
       if ($('drawer').classList.contains('open')) { closeDrawer(); return; }
       if (inField) { t.blur(); return; }
@@ -620,6 +774,7 @@
       else if (lk === 'y' || (lk === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
       else if (k === '0') { e.preventDefault(); fitView(); }
       else if (lk === 'l') { e.preventDefault(); layoutSelected(); }
+      else if (lk === 'k') { e.preventDefault(); startConnect(); }
       else if (lk === 'd') { e.preventDefault(); duplicateSelected(); }
       else if (lk === 'e') { e.preventDefault(); openExport(); }
       else if (lk === 'p') { e.preventDefault(); openExport(); }
@@ -631,13 +786,17 @@
     }
     if (e.altKey) return;
 
+    if (S.selLink) {
+      if (k === 'Enter' || k === 'F2') { e.preventDefault(); typeLinkLabel(); return; }
+      if (k.length === 1 && k !== ' ' && !e.repeat) { e.preventDefault(); typeLinkLabel(k); return; }
+    }
     switch (k) {
       case 'Tab': case 'Insert': e.preventDefault(); addChild(); return;
       case 'Enter': e.preventDefault(); if (S.sel) addSibling(); else select(S.map.rootId); return;
       case 'Delete': case 'Backspace': e.preventDefault(); deleteSelected(); return;
       case 'F2': e.preventDefault(); if (S.sel) startEdit(S.sel); return;
       case ' ': e.preventDefault(); if (S.sel) toggleCollapse(); return;
-      case 'Escape': if (S.sel) select(null); return;
+      case 'Escape': if (S.sel || S.selLink) select(null); return;
       case 'ArrowLeft': case 'ArrowRight': case 'ArrowUp': case 'ArrowDown': e.preventDefault(); navigate(k); return;
       case '+': case '=': zoomBy(1.2); return;
       case '-': zoomBy(1 / 1.2); return;
@@ -653,7 +812,9 @@
     const sel = S.sel && S.map.nodes[S.sel];
     $('btnUndo').disabled = !S.history.canUndo();
     $('btnRedo').disabled = !S.history.canRedo();
-    $('btnDelete').disabled = !sel || !sel.parent;
+    $('btnDelete').disabled = !S.selLink && (!sel || !sel.parent);
+    $('btnConnect').disabled = !S.sel && !S.selLink && !S.connect;
+    $('menuArrows').setAttribute('aria-checked', String(!!S.map.arrows));
     $('btnAuto').setAttribute('aria-pressed', S.map.autoLayout ? 'true' : 'false');
     if (document.activeElement !== $('mapName')) $('mapName').value = S.map.name;
   }
@@ -683,6 +844,7 @@
     $('btnAddChild').addEventListener('click', addChild);
     $('btnAddSibling').addEventListener('click', addSibling);
     $('btnDelete').addEventListener('click', deleteSelected);
+    $('btnConnect').addEventListener('click', () => (S.connect ? endConnect() : startConnect()));
     $('btnLayout').addEventListener('click', layoutSelected);
     $('btnAuto').addEventListener('click', () => {
       const on = !S.map.autoLayout;
@@ -706,6 +868,11 @@
       const cmd = b.getAttribute('data-cmd');
       ({
         exportJson: () => exportJson(S.map),
+        toggleArrows: () => {
+          const on = !S.map.arrows;
+          change(() => { S.map.arrows = on; });
+          D.toast(on ? 'Setas ativadas em todas as ligações' : 'Setas desativadas (exceto as definidas no tópico)');
+        },
         importJson: importJson,
         exportSvg: () => U.downloadBlob(E.svgFile(S.map, theme(), {}), U.safeFilename(S.map.name) + '.svg'),
         backups: openBackups,
@@ -774,7 +941,7 @@
       b.addEventListener('click', () => setStyle('shape', val || null));
       grid.appendChild(b);
     }
-    for (const box of document.querySelectorAll('.swatches')) {
+    for (const box of document.querySelectorAll('.swatches[data-prop]')) {
       const prop = box.getAttribute('data-prop');
       const auto = h('button', { class: 'swatch auto', 'data-value': '', title: 'Automática', 'aria-label': 'Cor automática', 'aria-pressed': 'false' });
       auto.addEventListener('click', () => setStyle(prop, null));
@@ -840,20 +1007,115 @@
     $('iDuplicate').addEventListener('click', duplicateSelected);
     $('iResetStyle').addEventListener('click', resetStyle);
     $('iDelete').addEventListener('click', deleteSelected);
+    $('iConnect').addEventListener('click', startConnect);
+
+    // ---- elemento: emoji ou ícone ----
+    for (const tab of $('elTabs').children) {
+      tab.addEventListener('click', () => {
+        S.elTab = tab.getAttribute('data-tab');
+        for (const x of $('elTabs').children) x.setAttribute('aria-selected', String(x === tab));
+        $('emojiGrid').hidden = S.elTab !== 'emoji';
+        $('iconGrid').hidden = S.elTab !== 'icon';
+      });
+    }
+    for (const em of MM.EMOJIS) {
+      const b = h('button', { class: 'btn', 'data-v': em, title: em, 'aria-pressed': 'false', text: em });
+      b.addEventListener('click', () => setElement('emoji', em));
+      $('emojiGrid').appendChild(b);
+    }
+    for (const [key, ic] of Object.entries(MM.ICONS)) {
+      const b = h('button', { class: 'btn', 'data-v': key, title: ic.label, 'aria-label': ic.label, 'aria-pressed': 'false' });
+      const sv = U.s('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true', stroke: ic.color || 'currentColor' });
+      sv.innerHTML = ic.svg.replace(/\{c\}/g, ic.color || 'currentColor');
+      b.appendChild(sv);
+      b.addEventListener('click', () => setElement('icon', key));
+      $('iconGrid').appendChild(b);
+    }
+    const emIn = $('emojiInput');
+    const applyEmoji = () => { if (emIn.value.trim()) setElement('emoji', emIn.value); };
+    emIn.addEventListener('change', applyEmoji);
+    emIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyEmoji(); } });
+    $('btnElClear').addEventListener('click', () => { emIn.value = ''; setElement(null); });
+
+    // ---- seta que chega no tópico ----
+    const edgeLabel = $('edgeLabelInput');
+    const applyEdgeLabel = () => { if (S.sel) setEdge(S.sel, 'label', edgeLabel.value.trim().slice(0, M.LIMITS.label)); };
+    edgeLabel.addEventListener('change', applyEdgeLabel);
+    edgeLabel.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyEdgeLabel(); edgeLabel.blur(); } });
+    for (const b of $('edgeArrowSeg').children) b.addEventListener('click', () => S.sel && setEdge(S.sel, 'arrow', b.getAttribute('data-v')));
+    for (const b of $('edgeLineSeg').children) b.addEventListener('click', () => S.sel && setEdge(S.sel, 'line', b.getAttribute('data-v')));
+
+    // ---- conexão livre selecionada ----
+    const linkLabel = $('linkLabelInput');
+    const applyLinkLabel = () => setLink('label', linkLabel.value.trim().slice(0, M.LIMITS.label));
+    linkLabel.addEventListener('change', applyLinkLabel);
+    linkLabel.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyLinkLabel(); linkLabel.blur(); } });
+    const lsw = $('linkSwatches');
+    for (const c of [''].concat(R.PALETTE, ['#495057'])) {
+      const s = h('button', { class: 'swatch' + (c ? '' : ' auto'), 'data-value': c, title: c || 'Automática', 'aria-label': c ? 'Cor ' + c : 'Cor automática', 'aria-pressed': 'false' });
+      if (c) s.style.background = c;
+      s.addEventListener('click', () => setLink('color', c));
+      lsw.appendChild(s);
+    }
+    const lcol = h('input', { type: 'color', 'aria-label': 'Escolher outra cor' });
+    lcol.addEventListener('change', () => setLink('color', lcol.value.toLowerCase()));
+    lsw.appendChild(h('label', { class: 'swatch custom', title: 'Outra cor' }, lcol));
+    for (const b of $('linkArrowSeg').children) b.addEventListener('click', () => setLink('arrow', b.getAttribute('data-v')));
+    for (const b of $('linkLineSeg').children) b.addEventListener('click', () => setLink('line', b.getAttribute('data-v')));
+    for (const b of $('linkBendSeg').children) b.addEventListener('click', () => setLink('bend', Number(b.getAttribute('data-v'))));
+    $('lReverse').addEventListener('click', reverseLink);
+    $('lDelete').addEventListener('click', deleteLink);
+  }
+
+  const pressSeg = (seg, cur) => { for (const b of seg.children) b.setAttribute('aria-pressed', String(b.getAttribute('data-v') === cur)); };
+
+  function updateLinkPanel(l) {
+    $('inspTitle').textContent = 'Seta entre tópicos';
+    const li = $('linkLabelInput');
+    if (document.activeElement !== li) li.value = l.label;
+    let found = false;
+    for (const b of $('linkSwatches').querySelectorAll('button.swatch')) {
+      const on = b.getAttribute('data-value') === (l.color || '');
+      found = found || on;
+      b.setAttribute('aria-pressed', String(on));
+    }
+    $('linkSwatches').querySelector('.custom').setAttribute('aria-pressed', String(!found));
+    pressSeg($('linkArrowSeg'), l.arrow);
+    pressSeg($('linkLineSeg'), l.line);
+    pressSeg($('linkBendSeg'), String(l.bend || 0));
   }
 
   function updateInspector() {
+    const l = S.selLink && M.getLink(S.map, S.selLink);
+    $('inspLink').hidden = !l;
+    if (l) {
+      $('inspEmpty').hidden = true;
+      $('inspBody').hidden = true;
+      updateLinkPanel(l);
+      return;
+    }
     const n = S.sel && S.map.nodes[S.sel];
     $('inspEmpty').hidden = !!n;
     $('inspBody').hidden = !n;
     if (!n) return;
+    for (const b of $('emojiGrid').children) b.setAttribute('aria-pressed', String(!n.icon && b.getAttribute('data-v') === n.emoji));
+    for (const b of $('iconGrid').children) b.setAttribute('aria-pressed', String(b.getAttribute('data-v') === n.icon));
+    if (document.activeElement !== $('emojiInput')) $('emojiInput').value = n.emoji && !MM.EMOJIS.includes(n.emoji) ? n.emoji : '';
+    $('btnElClear').disabled = !n.emoji && !n.icon;
+    $('edgeSection').hidden = !n.parent;
+    if (n.parent) {
+      const e = n.edge || {};
+      if (document.activeElement !== $('edgeLabelInput')) $('edgeLabelInput').value = e.label || '';
+      pressSeg($('edgeArrowSeg'), e.arrow || '');
+      pressSeg($('edgeLineSeg'), e.line || '');
+    }
     const s = n.style;
     const t = L.typo(S.map, n.id);
     $('inspTitle').textContent = n.parent ? 'Tópico' : 'Tópico central';
     for (const b of $('shapeGrid').children) b.setAttribute('aria-pressed', String((s.shape || '') === b.getAttribute('data-shape')));
     const box = L.box(S.map, n.id);
     const col = R.colors(S.map, n.id, theme(), box);
-    for (const sw of document.querySelectorAll('.swatches')) {
+    for (const sw of document.querySelectorAll('.swatches[data-prop]')) {
       const prop = sw.getAttribute('data-prop');
       const cur = s[prop] || '';
       let found = false;
@@ -1306,7 +1568,7 @@
       ['Duplo clique / F2', 'Editar texto'], ['Digitar qualquer letra', 'Substituir texto do tópico'], ['Shift + Enter (editando)', 'Nova linha'],
       ['Esc', 'Cancelar edição / tirar seleção'], ['Espaço', 'Recolher / expandir'], ['Setas', 'Selecionar tópico vizinho'],
       ['Ctrl + Z', 'Desfazer'], ['Ctrl + Y / Ctrl + Shift + Z', 'Refazer'], ['Ctrl + D', 'Duplicar ramificação'],
-      ['Ctrl + L', 'Reorganizar ramificação'], ['Ctrl + 0', 'Centralizar mapa'], ['+ / −  ou roda do mouse', 'Zoom'],
+      ['Ctrl + L', 'Reorganizar ramificação'], ['Ctrl + K', 'Conectar a outro tópico com uma seta'], ['Duplo clique na seta', 'Escrever rótulo da seta'], ['Ctrl + 0', 'Centralizar mapa'], ['+ / −  ou roda do mouse', 'Zoom'],
       ['Shift + roda', 'Mover na horizontal'], ['Arrastar o fundo', 'Mover a tela'], ['Arrastar tópico sobre outro', 'Mudar de pai'],
       ['Ctrl + E', 'Exportar PDF / PNG'], ['Ctrl + S', 'Salvar agora (o salvamento já é automático)'], ['Ctrl + O', 'Meus mapas'],
     ];
@@ -1335,6 +1597,11 @@
     if (!S.maps.length && !(await Store.getMeta('seeded', false))) {
       await addMaps(MM.demoMaps());
       await Store.setMeta('seeded', true);
+      await Store.setMeta('seededFlow', true);
+    } else if (!(await Store.getMeta('seededFlow', false))) {
+      // quem já usava o app recebe uma vez o novo exemplo de fluxo comercial
+      await addMaps(MM.demoMaps().filter((m) => m.name === 'Fluxo comercial'));
+      await Store.setMeta('seededFlow', true);
     }
     if (!S.maps.length) await addMaps([M.createMap('Novo mapa', 'Tópico central')]);
     const last = await Store.getMeta('lastMap', null);
@@ -1352,7 +1619,7 @@
   }
 
   // API para testes automatizados e depuração
-  MM.app = { S, addChild, addSibling, deleteSelected, undo, redo, select, startEdit, commitEdit, toggleCollapse, layoutSelected, fitView, openMap, createBackup, restoreBackup, openExport, setTheme, renderNow };
+  MM.app = { S, startConnect, finishConnect, selectLink, setElement, setEdge, setLink, deleteLink, addChild, addSibling, deleteSelected, undo, redo, select, startEdit, commitEdit, toggleCollapse, layoutSelected, fitView, openMap, createBackup, restoreBackup, openExport, setTheme, renderNow };
 
   init().catch((e) => {
     console.error(e);

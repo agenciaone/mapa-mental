@@ -100,7 +100,7 @@
     });
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); dlg.close(input.value.trim()); } });
     setTimeout(() => input.select(), 10);
-    return dlg.result.then((v) => (v ? v : null));
+    return dlg.result.then((v) => (v == null ? null : v || o.allowEmpty ? v : null));
   };
 
   D.toast = function (msg, kind) {

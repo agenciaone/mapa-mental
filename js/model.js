@@ -8,10 +8,11 @@
   M.VERSION = 1;
   M.SHAPES = ['rounded', 'rect', 'pill', 'ellipse', 'hexagon', 'underline', 'none'];
   M.BORDERS = ['solid', 'dashed', 'dotted', 'none'];
-  M.LIMITS = { text: 2000, note: 20000, name: 120, nodes: 5000 };
+  M.LIMITS = { text: 2000, note: 20000, name: 120, nodes: 5000, links: 2000, label: 120, emoji: 16 };
+  M.ARROWS = ['end', 'both', 'none'];
 
   M.newNode = function (text, parent) {
-    return { id: U.uid(), text: text == null ? '' : String(text), parent: parent || null, children: [], x: 0, y: 0, collapsed: false, style: {}, note: '', link: '' };
+    return { id: U.uid(), text: text == null ? '' : String(text), parent: parent || null, children: [], x: 0, y: 0, collapsed: false, style: {}, note: '', link: '', emoji: '', icon: '', edge: {} };
   };
 
   M.createMap = function (name, rootText) {
@@ -19,7 +20,7 @@
     const now = Date.now();
     return {
       id: U.uid(), name: name || 'Novo mapa', created: now, updated: now,
-      rootId: root.id, nodes: { [root.id]: root }, view: null,
+      rootId: root.id, nodes: { [root.id]: root }, view: null, links: [], arrows: false,
     };
   };
 
@@ -93,6 +94,7 @@
     const p = map.nodes[n.parent];
     if (p) p.children = p.children.filter((c) => c !== id);
     for (const sid of M.subtreeIds(map, id)) delete map.nodes[sid];
+    if (map.links) map.links = map.links.filter((l) => map.nodes[l.from] && map.nodes[l.to]);
     return true;
   };
 
@@ -128,12 +130,30 @@
     return copy.id;
   };
 
+  // ---------- conexões livres entre tópicos ----------
+  M.addLink = function (map, from, to) {
+    if (!map.links) map.links = [];
+    if (from === to || !map.nodes[from] || !map.nodes[to]) return null;
+    if (map.links.some((l) => l.from === from && l.to === to)) return null;
+    const l = { id: U.uid(), from, to, label: '', color: '', line: 'dashed', arrow: 'end', bend: 0 };
+    map.links.push(l);
+    return l;
+  };
+  M.getLink = (map, id) => (map.links || []).find((l) => l.id === id);
+  M.removeLink = function (map, id) {
+    const n = (map.links || []).length;
+    map.links = (map.links || []).filter((l) => l.id !== id);
+    return map.links.length !== n;
+  };
+
   // ---------- serialização / histórico ----------
-  M.snapshot = (map) => JSON.stringify({ rootId: map.rootId, nodes: map.nodes });
+  M.snapshot = (map) => JSON.stringify({ rootId: map.rootId, nodes: map.nodes, links: map.links || [], arrows: !!map.arrows });
   M.restore = function (map, snap) {
     const o = JSON.parse(snap);
     map.rootId = o.rootId;
     map.nodes = o.nodes;
+    map.links = o.links || [];
+    map.arrows = !!o.arrows;
   };
 
   M.History = class {
@@ -166,6 +186,18 @@
     return out;
   }
 
+  function cleanEdge(e) {
+    const out = {};
+    if (!e || typeof e !== 'object') return out;
+    const label = str(e.label, M.LIMITS.label).replace(/[\r\n]+/g, ' ').trim();
+    if (label) out.label = label;
+    if (M.ARROWS.includes(e.arrow)) out.arrow = e.arrow;
+    if (M.BORDERS.includes(e.line) && e.line !== 'none') out.line = e.line;
+    return out;
+  }
+
+  M.cleanEmoji = (v) => str(v, 64).replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, M.LIMITS.emoji);
+
   /**
    * Recebe um objeto desconhecido e devolve um mapa válido com ids novos.
    * Remove nós órfãos, ciclos, campos desconhecidos e links inseguros.
@@ -192,6 +224,9 @@
       n.note = str(s.note, M.LIMITS.note);
       n.link = U.safeUrl(s.link) || '';
       n.style = cleanStyle(s.style);
+      n.emoji = M.cleanEmoji(s.emoji);
+      n.icon = typeof s.icon === 'string' && MM.ICONS && MM.ICONS[s.icon] ? s.icon : '';
+      n.edge = cleanEdge(s.edge);
       nodes[n.id] = n;
       const kids = Array.isArray(s.children) ? s.children : [];
       for (const k of kids) {
@@ -203,6 +238,20 @@
     };
     const newRoot = walk(rootId, null);
     const now = Date.now();
+    const links = [];
+    for (const l of Array.isArray(raw.links) ? raw.links.slice(0, M.LIMITS.links) : []) {
+      if (!l || typeof l !== 'object') continue;
+      const from = idMap.get(l.from), to = idMap.get(l.to);
+      if (!from || !to || from === to) continue;
+      links.push({
+        id: U.uid(), from, to,
+        label: str(l.label, M.LIMITS.label).replace(/[\r\n]+/g, ' ').trim(),
+        color: U.isHex(l.color) ? l.color.toLowerCase() : '',
+        line: M.BORDERS.includes(l.line) && l.line !== 'none' ? l.line : 'dashed',
+        arrow: M.ARROWS.includes(l.arrow) ? l.arrow : 'end',
+        bend: U.clamp(num(l.bend, 0), -2, 2),
+      });
+    }
     const v = raw.view && typeof raw.view === 'object' ? { x: num(raw.view.x, 0), y: num(raw.view.y, 0), k: U.clamp(num(raw.view.k, 1), 0.1, 4) } : null;
     return {
       id: U.uid(),
@@ -212,6 +261,9 @@
       rootId: newRoot,
       nodes,
       view: v,
+      links,
+      arrows: raw.arrows === true,
+      autoLayout: raw.autoLayout === true,
     };
   };
 

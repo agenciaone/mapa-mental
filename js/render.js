@@ -81,8 +81,70 @@
     const ex = c.x - side * cb.w / 2;
     const ey = (cb.shape === 'underline' || cb.shape === 'none') ? c.y + cb.h / 2 : c.y;
     const dx = (ex - sx) * 0.55;
-    return `M${sx.toFixed(1)} ${sy.toFixed(1)}C${(sx + dx).toFixed(1)} ${sy.toFixed(1)} ${(ex - dx).toFixed(1)} ${ey.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`;
+    const g = { s: [sx, sy], c1: [sx + dx, sy], c2: [ex - dx, ey], e: [ex, ey] };
+    g.d = `M${f(sx)} ${f(sy)}C${f(sx + dx)} ${f(sy)} ${f(ex - dx)} ${f(ey)} ${f(ex)} ${f(ey)}`;
+    // rótulo um pouco depois do meio, para separar setas que saem do mesmo ponto
+    const t = 0.6, u = 1 - t, k0 = u * u * u, k1 = 3 * u * u * t, k2 = 3 * u * t * t, k3 = t * t * t;
+    g.mid = [k0 * sx + k1 * g.c1[0] + k2 * g.c2[0] + k3 * ex, k0 * sy + k1 * g.c1[1] + k2 * g.c2[1] + k3 * ey];
+    return g;
   }
+
+  const f = (v) => v.toFixed(1);
+
+  /** Ponta de seta (triângulo) em `tip`, apontando na direção from→tip. */
+  function arrowHead(tip, from, size) {
+    let dx = tip[0] - from[0], dy = tip[1] - from[1];
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len; dy /= len;
+    const bx = tip[0] - dx * size, by = tip[1] - dy * size;
+    const w = size * 0.55;
+    return `M${f(tip[0])} ${f(tip[1])}L${f(bx - dy * w)} ${f(by + dx * w)}L${f(bx + dy * w)} ${f(by - dx * w)}Z`;
+  }
+
+  R.edgeArrow = (map, id) => {
+    const e = map.nodes[id].edge || {};
+    return e.arrow || (map.arrows ? 'end' : 'none');
+  };
+
+  function lineDash(line, w) {
+    return line === 'dashed' ? `${w * 3.2},${w * 2.4}` : line === 'dotted' ? `0.1,${w * 2.6}` : null;
+  }
+
+  function drawLabel(layer, text, pt, color, theme, attrs) {
+    const w = L.labelWidth(text) + 14, h = 20;
+    const g = U.s('g', Object.assign({ class: 'edge-label' }, attrs || {}));
+    g.appendChild(U.s('rect', { x: f(pt[0] - w / 2), y: f(pt[1] - h / 2), width: f(w), height: h, rx: 10, fill: theme.bg, stroke: color, 'stroke-width': 1.2 }));
+    const t = U.s('text', { x: f(pt[0]), y: f(pt[1] + 4.2), 'text-anchor': 'middle', 'font-family': L.FONT, 'font-size': 12, 'font-weight': 600, fill: color });
+    t.textContent = text;
+    g.appendChild(t);
+    layer.appendChild(g);
+  }
+
+  /** Ponto na borda do retângulo do tópico, na direção de (tx, ty). */
+  function boundary(map, id, tx, ty) {
+    const n = map.nodes[id];
+    const b = L.box(map, id);
+    const dx = tx - n.x, dy = ty - n.y;
+    const k = 1 / Math.max(Math.abs(dx) / (b.w / 2 + 7), Math.abs(dy) / (b.h / 2 + 7), 1e-6);
+    return [n.x + dx * k, n.y + dy * k];
+  }
+
+  R.linkGeom = function (map, l) {
+    const a = map.nodes[l.from], b = map.nodes[l.to];
+    const s = boundary(map, l.from, b.x, b.y);
+    const e = boundary(map, l.to, a.x, a.y);
+    const dx = e[0] - s[0], dy = e[1] - s[1];
+    const len = Math.hypot(dx, dy) || 1;
+    const k = len * (0.18 + (l.bend || 0) * 0.2);
+    const c = [(s[0] + e[0]) / 2 - (dy / len) * k, (s[1] + e[1]) / 2 + (dx / len) * k];
+    return {
+      s, e, c,
+      d: `M${f(s[0])} ${f(s[1])}Q${f(c[0])} ${f(c[1])} ${f(e[0])} ${f(e[1])}`,
+      mid: [(s[0] + 2 * c[0] + e[0]) / 4, (s[1] + 2 * c[1] + e[1]) / 4],
+    };
+  };
+
+  R.linkColor = (l, theme) => l.color || theme.muted;
 
   function shapeEl(b, col) {
     const { w, h } = b;
@@ -107,6 +169,27 @@
     }
   }
 
+  const EMOJI_FONT = `"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", ${L.FONT}`;
+
+  /** Emoji ou ícone da biblioteca, desenhado num quadrado de lado b.elSize. */
+  R.elementEl = function (n, b, col, x, y) {
+    const s = b.elSize;
+    if (b.element === 'icon') {
+      const ic = MM.ICONS[n.icon];
+      const color = ic.color || col.text;
+      const g = U.s('g', {
+        class: 'element', transform: `translate(${f(x)},${f(y)}) scale(${(s / 24).toFixed(3)})`,
+        fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+      });
+      // marcação estática da biblioteca; a cor é um hex validado
+      g.innerHTML = ic.svg.replace(/\{c\}/g, color);
+      return g;
+    }
+    const t = U.s('text', { class: 'element', x: f(x + s / 2), y: f(y + s * 0.84), 'text-anchor': 'middle', 'font-size': f(s * 0.9), 'font-family': EMOJI_FONT });
+    t.textContent = n.emoji;
+    return t;
+  };
+
   function toggleSide(map, id) {
     const n = map.nodes[id];
     const first = map.nodes[n.children[0]];
@@ -116,29 +199,54 @@
 
   /**
    * Desenha o mapa dentro de `target` (um <g>).
-   * opts: interactive, selectedId, dropId, draggingId, expandAll
+   * opts: interactive, selectedId, selectedLink, dropId, draggingId, expandAll
    */
   R.draw = function (target, map, theme, opts) {
     opts = opts || {};
     while (target.firstChild) target.removeChild(target.firstChild);
     const edges = U.s('g', { class: 'edges', fill: 'none', 'stroke-linecap': 'round' });
+    const links = U.s('g', { class: 'links', fill: 'none', 'stroke-linecap': 'round' });
+    const labels = U.s('g', { class: 'labels' });
     const nodes = U.s('g', { class: 'nodes' });
-    target.appendChild(edges);
-    target.appendChild(nodes);
+    target.append(edges, links, labels, nodes);
     const ids = M.visibleIds(map, opts.expandAll);
+    const visible = new Set(ids);
     const dragSet = opts.draggingId ? new Set(M.subtreeIds(map, opts.draggingId)) : null;
 
     for (const id of ids) {
       const n = map.nodes[id];
       if (!n.parent) continue;
       const d = M.depth(map, id);
-      const p = U.s('path', {
-        d: edgePath(map, n.parent, id),
-        stroke: R.branchColor(map, id, theme),
-        'stroke-width': edgeWidth(d),
-      });
-      if (dragSet && dragSet.has(id)) p.setAttribute('opacity', '0.55');
-      edges.appendChild(p);
+      const color = R.branchColor(map, id, theme);
+      const w = edgeWidth(d);
+      const geo = edgePath(map, n.parent, id);
+      const e = n.edge || {};
+      const g = U.s('g', dragSet && dragSet.has(id) ? { opacity: 0.55 } : null);
+      g.appendChild(U.s('path', { d: geo.d, stroke: color, 'stroke-width': w, 'stroke-dasharray': lineDash(e.line, w) }));
+      const arrow = R.edgeArrow(map, id);
+      const size = 7 + w * 2;
+      if (arrow === 'end' || arrow === 'both') g.appendChild(U.s('path', { d: arrowHead(geo.e, geo.c2, size), fill: color, stroke: 'none' }));
+      if (arrow === 'both') g.appendChild(U.s('path', { d: arrowHead(geo.s, geo.c1, size), fill: color, stroke: 'none' }));
+      if (opts.interactive) g.appendChild(U.s('path', { d: geo.d, stroke: 'transparent', 'stroke-width': 14, class: 'edge-hit', 'data-edge': id }));
+      edges.appendChild(g);
+      if (e.label) drawLabel(labels, e.label, geo.mid, color, theme, opts.interactive ? { 'data-edge': id } : null);
+    }
+
+    for (const l of map.links || []) {
+      if (!visible.has(l.from) || !visible.has(l.to)) continue;
+      const geo = R.linkGeom(map, l);
+      const color = R.linkColor(l, theme);
+      const w = 2;
+      const g = U.s('g', { class: 'link' });
+      if (opts.interactive && l.id === opts.selectedLink) {
+        g.appendChild(U.s('path', { d: geo.d, stroke: theme.accent, 'stroke-width': 8, opacity: 0.3 }));
+      }
+      g.appendChild(U.s('path', { d: geo.d, stroke: color, 'stroke-width': w, 'stroke-dasharray': lineDash(l.line, w) }));
+      if (l.arrow === 'end' || l.arrow === 'both') g.appendChild(U.s('path', { d: arrowHead(geo.e, geo.c, 11), fill: color, stroke: 'none' }));
+      if (l.arrow === 'both') g.appendChild(U.s('path', { d: arrowHead(geo.s, geo.c, 11), fill: color, stroke: 'none' }));
+      if (opts.interactive) g.appendChild(U.s('path', { d: geo.d, stroke: 'transparent', 'stroke-width': 14, class: 'link-hit', 'data-link': l.id }));
+      links.appendChild(g);
+      if (l.label) drawLabel(labels, l.label, geo.mid, color, theme, opts.interactive ? { 'data-link': l.id } : null);
     }
 
     for (const id of ids) {
@@ -165,9 +273,13 @@
         g.appendChild(line);
       }
 
-      const contentW = b.textW + b.iconW;
-      const left = (b.w - contentW) / 2;
+      const contentW = b.elW + b.textW + b.iconW;
+      let left = (b.w - contentW) / 2;
       const top = (b.h - b.lines.length * b.lineH) / 2;
+      if (b.element) {
+        g.appendChild(R.elementEl(n, b, col, left, (b.h - b.elSize) / 2));
+        left += b.elW;
+      }
       const text = U.s('text', {
         'font-family': L.FONT, 'font-size': b.fontSize, fill: col.text, 'text-anchor': 'middle',
         'font-weight': b.bold ? 700 : 400, 'font-style': b.italic ? 'italic' : null,
@@ -222,8 +334,18 @@
   R.contentBBox = function (map, expandAll) {
     const ids = M.visibleIds(map, expandAll);
     const b = L.bbox(map, ids);
+    let x1 = b.x, y1 = b.y, x2 = b.x + b.w, y2 = b.y + b.h;
+    const visible = new Set(ids);
+    // conexões livres podem fazer curvas para fora dos tópicos
+    for (const l of map.links || []) {
+      if (!visible.has(l.from) || !visible.has(l.to)) continue;
+      const g = R.linkGeom(map, l);
+      const hw = l.label ? L.labelWidth(l.label) / 2 + 8 : 0;
+      x1 = Math.min(x1, g.mid[0] - hw); x2 = Math.max(x2, g.mid[0] + hw);
+      y1 = Math.min(y1, g.mid[1] - 12); y2 = Math.max(y2, g.mid[1] + 12);
+    }
     const pad = 24;
-    return { x: b.x - pad, y: b.y - pad, w: b.w + pad * 2, h: b.h + pad * 2 };
+    return { x: x1 - pad, y: y1 - pad, w: x2 - x1 + pad * 2, h: y2 - y1 + pad * 2 };
   };
 
   R.minFontSize = function (map, expandAll) {

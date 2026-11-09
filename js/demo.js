@@ -5,18 +5,29 @@
   function build(name, spec) {
     const map = M.createMap(name, spec.t);
     const root = map.nodes[map.rootId];
-    Object.assign(root, { note: spec.note || '', style: spec.style || {} });
+    Object.assign(root, { note: spec.note || '', style: spec.style || {}, icon: spec.icon || '', emoji: spec.emoji || '' });
+    map.arrows = !!spec.arrows;
+    const byText = { [spec.t]: root.id };
     const add = (parentId, s, depth) => {
       const n = M.addChild(map, parentId, s.t);
+      byText[s.t] = n.id;
       n.note = s.note || '';
       n.link = s.link || '';
+      n.icon = s.icon || '';
+      n.emoji = s.emoji || '';
+      n.edge = s.edge ? { label: s.edge } : {};
       n.style = Object.assign({}, s.style || {});
       if (depth === 1 && !n.style.branch) n.style.branch = R.PALETTE[(map.nodes[parentId].children.length - 1) % R.PALETTE.length];
       (s.kids || []).forEach((k) => add(n.id, k, depth + 1));
       n.collapsed = !!s.collapsed;
     };
     (spec.kids || []).forEach((k) => add(map.rootId, k, 1));
-    L.layoutAll(map, true);
+    if (spec.oneSide) for (const c of root.children) map.nodes[c].x = root.x + 1;
+    L.layoutAll(map, false);
+    for (const [a, b, label] of spec.links || []) {
+      const l = M.addLink(map, byText[a], byText[b]);
+      if (l) l.label = label || '';
+    }
     return map;
   }
 
@@ -89,7 +100,32 @@
         ] },
       ],
     });
+    const flow = build('Fluxo comercial', {
+      t: 'Lead qualificado',
+      icon: 'lead',
+      style: { fontSize: 20 },
+      arrows: true,
+      oneSide: true,
+      note: 'Exemplo de fluxo: as setas mostram para quais canais o lead é direcionado. Clique numa seta para editar o rótulo; use "Conectar" para ligar quaisquer tópicos.',
+      kids: [
+        { t: 'WhatsApp', icon: 'whatsapp', edge: 'resposta rápida', kids: [
+          { t: 'Agendar reunião', icon: 'evento', edge: 'interessado', kids: [
+            { t: 'Proposta', icon: 'proposta', edge: 'em até 24h', kids: [
+              { t: 'Fechamento', icon: 'trofeu', edge: 'aprovou' },
+            ] },
+          ] },
+        ] },
+        { t: 'Telefone', icon: 'telefone', edge: 'ticket alto' },
+        { t: 'E-mail', icon: 'email', edge: 'envio de material' },
+        { t: 'Instagram', icon: 'instagram', edge: 'remarketing' },
+      ],
+      links: [
+        ['Telefone', 'Agendar reunião', 'quer conversar'],
+        ['E-mail', 'Proposta', 'pediu orçamento'],
+      ],
+    });
     project.updated -= 1000; // o guia aparece primeiro
-    return [guide, project];
+    flow.updated -= 500;
+    return [guide, flow, project];
   };
 })(window.MM);

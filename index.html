@@ -44,6 +44,9 @@
     <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></symbol>
     <symbol id="i-print" viewBox="0 0 24 24"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/></symbol>
+    <symbol id="i-connect" viewBox="0 0 24 24"><circle cx="5" cy="17" r="2.5"/><path d="M7 15.5C10 8 14 6.5 19 6.5"/><path d="M15.5 3.5L19 6.5l-3.5 3"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15M14 7l5 5-5 5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
     <symbol id="i-logo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><circle cx="4.5" cy="6" r="1.8"/><circle cx="19.5" cy="6" r="1.8"/><circle cx="4.5" cy="18" r="1.8"/><circle cx="19.5" cy="18" r="1.8"/><path d="M9.4 10.2L6 7.2M14.6 10.2l3.4-3M9.4 13.8L6 16.8M14.6 13.8l3.4 3"/></symbol>
   </defs>
 </svg>
@@ -62,7 +65,8 @@
     <div class="tb-group">
       <button class="btn icon" id="btnAddChild" title="Novo subtópico (Tab)" aria-label="Novo subtópico"><svg class="ic"><use href="#i-child"/></svg></button>
       <button class="btn icon" id="btnAddSibling" title="Novo tópico irmão (Enter)" aria-label="Novo tópico irmão"><svg class="ic"><use href="#i-sibling"/></svg></button>
-      <button class="btn icon" id="btnDelete" title="Excluir tópico (Delete)" aria-label="Excluir tópico"><svg class="ic"><use href="#i-trash"/></svg></button>
+      <button class="btn icon" id="btnConnect" title="Conectar a outro tópico com uma seta (Ctrl+K)" aria-label="Conectar tópicos"><svg class="ic"><use href="#i-connect"/></svg></button>
+      <button class="btn icon" id="btnDelete" title="Excluir (Delete)" aria-label="Excluir"><svg class="ic"><use href="#i-trash"/></svg></button>
     </div>
     <div class="tb-group">
       <button class="btn icon" id="btnLayout" title="Reorganizar tópico selecionado e subtópicos (Ctrl+L)" aria-label="Reorganizar"><svg class="ic"><use href="#i-layout"/></svg></button>
@@ -85,6 +89,8 @@
           <button role="menuitem" data-cmd="exportJson"><svg class="ic"><use href="#i-file"/></svg>Exportar mapa (JSON)</button>
           <button role="menuitem" data-cmd="importJson"><svg class="ic"><use href="#i-import"/></svg>Importar mapa (JSON)</button>
           <button role="menuitem" data-cmd="exportSvg"><svg class="ic"><use href="#i-export"/></svg>Exportar imagem SVG</button>
+          <hr>
+          <button role="menuitemcheckbox" data-cmd="toggleArrows" id="menuArrows" aria-checked="false"><svg class="ic"><use href="#i-arrow"/></svg>Setas em todas as ligações<svg class="ic check"><use href="#i-check"/></svg></button>
           <hr>
           <button role="menuitem" data-cmd="backups"><svg class="ic"><use href="#i-shield"/></svg>Cópias de segurança</button>
           <button role="menuitem" data-cmd="expandAll"><svg class="ic"><use href="#i-expand"/></svg>Expandir tudo</button>
@@ -121,6 +127,7 @@
       </svg>
       <textarea id="editor" class="editor" hidden spellcheck="true" aria-label="Editar texto do tópico"></textarea>
       <div id="dropHint" class="drop-hint" hidden>Solte para tornar subtópico</div>
+      <div id="connectHint" class="drop-hint" hidden>Clique no tópico de destino da seta · Esc cancela</div>
     </div>
 
     <aside id="inspector" class="inspector" aria-label="Estilo do tópico">
@@ -132,7 +139,60 @@
         <p>Selecione um tópico para alterar forma, cores, texto, notas e links.</p>
         <p class="muted small">Dica: clique duas vezes num tópico para editar o texto.</p>
       </div>
+      <div id="inspLink" class="insp-body" hidden>
+        <section>
+          <h3><label for="linkLabelInput">Rótulo da seta</label></h3>
+          <input id="linkLabelInput" type="text" maxlength="120" placeholder="Ex.: WhatsApp, indicação…">
+        </section>
+        <section>
+          <h3>Cor</h3>
+          <div class="swatches" id="linkSwatches"></div>
+        </section>
+        <section>
+          <h3>Ponta</h3>
+          <div class="segmented" id="linkArrowSeg">
+            <button class="btn seg" data-v="end">Seta →</button>
+            <button class="btn seg" data-v="both">Dupla ↔</button>
+            <button class="btn seg" data-v="none">Sem seta</button>
+          </div>
+        </section>
+        <section>
+          <h3>Linha</h3>
+          <div class="segmented" id="linkLineSeg">
+            <button class="btn seg" data-v="solid">Contínua</button>
+            <button class="btn seg" data-v="dashed">Tracejada</button>
+            <button class="btn seg" data-v="dotted">Pontilhada</button>
+          </div>
+        </section>
+        <section>
+          <h3>Curva</h3>
+          <div class="segmented" id="linkBendSeg">
+            <button class="btn seg" data-v="-0.9">Reta</button>
+            <button class="btn seg" data-v="0">Suave</button>
+            <button class="btn seg" data-v="1">Maior</button>
+            <button class="btn seg" data-v="-1.8">Invertida</button>
+          </div>
+        </section>
+        <section class="insp-actions">
+          <button class="btn" id="lReverse"><svg class="ic"><use href="#i-redo"/></svg>Inverter</button>
+          <button class="btn danger" id="lDelete"><svg class="ic"><use href="#i-trash"/></svg>Excluir</button>
+        </section>
+      </div>
       <div id="inspBody" class="insp-body" hidden>
+        <section>
+          <h3>Elemento (emoji ou ícone)</h3>
+          <div class="tabs" id="elTabs" role="tablist">
+            <button class="btn" role="tab" data-tab="emoji" aria-selected="true">Emoji</button>
+            <button class="btn" role="tab" data-tab="icon" aria-selected="false">Ícones</button>
+          </div>
+          <div class="el-grid" id="emojiGrid"></div>
+          <div class="el-grid icons" id="iconGrid" hidden></div>
+          <div class="row el-row">
+            <input id="emojiInput" type="text" maxlength="16" placeholder="Outro emoji (Win + .)" aria-label="Outro emoji">
+            <button class="btn outline" id="btnElClear">Remover</button>
+          </div>
+          <p class="muted small">Deixe o texto vazio para mostrar só o elemento, em tamanho grande.</p>
+        </section>
         <section>
           <h3>Forma</h3>
           <div class="shape-grid" id="shapeGrid"></div>
@@ -161,6 +221,21 @@
             <button class="btn seg" data-border="none">Nenhuma</button>
           </div>
         </section>
+        <section id="edgeSection">
+          <h3><label for="edgeLabelInput">Seta que chega neste tópico</label></h3>
+          <input id="edgeLabelInput" type="text" maxlength="120" placeholder="Rótulo (ex.: canal, condição)">
+          <div class="segmented" id="edgeArrowSeg">
+            <button class="btn seg" data-v="">Padrão do mapa</button>
+            <button class="btn seg" data-v="end">Seta →</button>
+            <button class="btn seg" data-v="both">Dupla ↔</button>
+            <button class="btn seg" data-v="none">Sem seta</button>
+          </div>
+          <div class="segmented" id="edgeLineSeg">
+            <button class="btn seg" data-v="">Contínua</button>
+            <button class="btn seg" data-v="dashed">Tracejada</button>
+            <button class="btn seg" data-v="dotted">Pontilhada</button>
+          </div>
+        </section>
         <section>
           <h3><label for="noteInput">Nota</label></h3>
           <textarea id="noteInput" rows="4" placeholder="Escreva uma nota para este tópico"></textarea>
@@ -177,6 +252,7 @@
           <button class="btn" id="iAddChild"><svg class="ic"><use href="#i-child"/></svg>Subtópico</button>
           <button class="btn" id="iAddSibling"><svg class="ic"><use href="#i-sibling"/></svg>Irmão</button>
           <button class="btn" id="iCollapse"><svg class="ic"><use href="#i-collapse"/></svg><span>Recolher</span></button>
+          <button class="btn" id="iConnect"><svg class="ic"><use href="#i-connect"/></svg>Conectar</button>
           <button class="btn" id="iLayout"><svg class="ic"><use href="#i-layout"/></svg>Reorganizar</button>
           <button class="btn" id="iDuplicate"><svg class="ic"><use href="#i-copy"/></svg>Duplicar</button>
           <button class="btn" id="iResetStyle"><svg class="ic"><use href="#i-palette"/></svg>Limpar estilo</button>
@@ -193,6 +269,7 @@
 <div id="printArea" class="print-area" aria-hidden="true"></div>
 
 <script src="js/util.js"></script>
+<script src="js/icons.js"></script>
 <script src="js/model.js"></script>
 <script src="js/layout.js"></script>
 <script src="js/render.js"></script>
