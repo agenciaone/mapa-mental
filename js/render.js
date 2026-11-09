@@ -162,12 +162,28 @@
         return U.s('polygon', Object.assign({ points: `${k},0 ${w - k},0 ${w},${h / 2} ${w - k},${h} ${k},${h} 0,${h / 2}` }, common));
       }
       case 'rect': return U.s('rect', Object.assign({ width: w, height: h, rx: 2 }, common));
-      case 'pill': return U.s('rect', Object.assign({ width: w, height: h, rx: h / 2 }, common));
+      case 'pill': return U.s('rect', Object.assign({ width: w, height: h, rx: b.image ? Math.min(h / 2, 18) : h / 2 }, common));
       case 'underline':
       case 'none': return U.s('rect', Object.assign({ width: w, height: h, rx: 4 }, common));
       default: return U.s('rect', Object.assign({ width: w, height: h, rx: Math.min(10, h / 3) }, common));
     }
   }
+
+  const assetUrls = new Map();
+  /** URL de blob em cache para a foto (evita repassar o data URL a cada quadro). */
+  R.assetUrl = function (map, aid) {
+    const data = map.assets && map.assets[aid];
+    if (!data) return '';
+    let hit = assetUrls.get(aid);
+    if (hit && hit.data === data) return hit.url;
+    const comma = data.indexOf(',');
+    const bin = atob(data.slice(comma + 1));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: data.slice(5, data.indexOf(';')) }));
+    assetUrls.set(aid, { data, url });
+    return url;
+  };
 
   const EMOJI_FONT = `"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", ${L.FONT}`;
 
@@ -273,11 +289,20 @@
         g.appendChild(line);
       }
 
+      if (b.image) {
+        const cid = 'ci-' + id;
+        const cp = U.s('clipPath', { id: cid });
+        cp.appendChild(U.s('rect', { x: f(b.imgX), y: f(b.imgY), width: b.imgW, height: b.imgH, rx: 6 }));
+        g.appendChild(cp);
+        // na tela usa URL de blob (rápido); na exportação, o data URL (autocontido)
+        const href = opts.interactive ? R.assetUrl(map, n.image.id) : map.assets[n.image.id];
+        g.appendChild(U.s('image', { href, x: f(b.imgX), y: f(b.imgY), width: b.imgW, height: b.imgH, preserveAspectRatio: 'xMidYMid slice', 'clip-path': `url(#${cid})` }));
+      }
       const contentW = b.elW + b.textW + b.iconW;
       let left = (b.w - contentW) / 2;
-      const top = (b.h - b.lines.length * b.lineH) / 2;
+      const top = b.rowCY - (b.lines.length * b.lineH) / 2;
       if (b.element) {
-        g.appendChild(R.elementEl(n, b, col, left, (b.h - b.elSize) / 2));
+        g.appendChild(R.elementEl(n, b, col, left, b.rowCY - b.elSize / 2));
         left += b.elW;
       }
       const text = U.s('text', {
@@ -292,7 +317,7 @@
       g.appendChild(text);
 
       let ix = left + b.textW + 6;
-      const iy = (b.h - b.iconSize) / 2;
+      const iy = b.rowCY - b.iconSize / 2;
       for (const kind of ['note', 'link']) {
         if (kind === 'note' && !n.note) continue;
         if (kind === 'link' && !n.link) continue;

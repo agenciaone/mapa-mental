@@ -43,6 +43,7 @@ Dê dois cliques em `index.html`. Tudo funciona, exceto a instalação como apli
 - Desfazer / refazer (Ctrl+Z / Ctrl+Y).
 - Painel de estilo: forma (7 opções), cor de preenchimento, cor do texto, cor da ramificação, tamanho do texto, negrito, itálico, borda.
 - Elementos visuais: cada tópico pode ter um emoji ou um ícone da biblioteca própria (WhatsApp, Instagram, e-mail, telefone, site, funil, proposta, contrato, pagamento etc.). Com o texto vazio, o tópico mostra só o elemento, em tamanho grande.
+- Fotos: cada tópico pode ter uma foto (botão "Adicionar foto", colar com Ctrl+V ou arrastar o arquivo sobre o tópico), em tamanho pequeno, médio ou grande. As imagens são reduzidas automaticamente e ficam guardadas dentro do mapa, então funcionam offline e entram no PDF, PNG e JSON.
 - Fluxos com setas: as ligações pai → filho podem ter ponta de seta (simples ou dupla), rótulo (ex.: "resposta rápida") e linha tracejada ou pontilhada. Em ⋯ → "Setas em todas as ligações" o mapa inteiro vira um fluxo.
 - Conexões livres: botão "Conectar" (Ctrl+K) liga qualquer tópico a qualquer outro com uma seta extra, com rótulo, cor, curva e sentido ajustáveis. Clique na seta para editar; Delete exclui.
 - Notas e links por tópico (links aceitam apenas http, https, mailto e tel).

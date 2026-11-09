@@ -12,7 +12,7 @@
   M.ARROWS = ['end', 'both', 'none'];
 
   M.newNode = function (text, parent) {
-    return { id: U.uid(), text: text == null ? '' : String(text), parent: parent || null, children: [], x: 0, y: 0, collapsed: false, style: {}, note: '', link: '', emoji: '', icon: '', edge: {} };
+    return { id: U.uid(), text: text == null ? '' : String(text), parent: parent || null, children: [], x: 0, y: 0, collapsed: false, style: {}, note: '', link: '', emoji: '', icon: '', edge: {}, image: null };
   };
 
   M.createMap = function (name, rootText) {
@@ -20,7 +20,7 @@
     const now = Date.now();
     return {
       id: U.uid(), name: name || 'Novo mapa', created: now, updated: now,
-      rootId: root.id, nodes: { [root.id]: root }, view: null, links: [], arrows: false,
+      rootId: root.id, nodes: { [root.id]: root }, view: null, links: [], arrows: false, assets: {},
     };
   };
 
@@ -139,6 +139,29 @@
     map.links.push(l);
     return l;
   };
+  // ---------- fotos ----------
+  // As imagens ficam em map.assets (fora do histórico de desfazer, que guarda só a referência).
+  M.IMAGE_SIZES = { S: 100, M: 170, L: 260 };
+  M.IMAGE_RE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/;
+  M.LIMITS.image = 4 * 1024 * 1024; // caracteres do data URL
+
+  M.addAsset = function (map, dataUrl) {
+    if (!map.assets) map.assets = {};
+    for (const [id, v] of Object.entries(map.assets)) if (v === dataUrl) return id;
+    const id = U.uid();
+    map.assets[id] = dataUrl;
+    return id;
+  };
+
+  /** Remove fotos que nenhum tópico usa (chamar só quando o histórico for limpo). */
+  M.gcAssets = function (map) {
+    if (!map.assets) { map.assets = {}; return 0; }
+    const used = new Set(Object.values(map.nodes).map((n) => n.image && n.image.id).filter(Boolean));
+    let removed = 0;
+    for (const id of Object.keys(map.assets)) if (!used.has(id)) { delete map.assets[id]; removed++; }
+    return removed;
+  };
+
   M.getLink = (map, id) => (map.links || []).find((l) => l.id === id);
   M.removeLink = function (map, id) {
     const n = (map.links || []).length;
@@ -211,6 +234,20 @@
     const idMap = new Map();
     const nodes = {};
     let count = 0;
+    // fotos: só data URLs de imagem válidas, com tamanho limitado e ids novos
+    const assets = {};
+    const assetMap = new Map();
+    const rawAssets = raw.assets && typeof raw.assets === 'object' ? raw.assets : {};
+    const useAsset = (oldId) => {
+      if (typeof oldId !== 'string') return null;
+      if (assetMap.has(oldId)) return assetMap.get(oldId);
+      const v = rawAssets[oldId];
+      if (typeof v !== 'string' || v.length > M.LIMITS.image || !M.IMAGE_RE.test(v)) { assetMap.set(oldId, null); return null; }
+      const id = U.uid();
+      assets[id] = v;
+      assetMap.set(oldId, id);
+      return id;
+    };
     const walk = (oldId, newParent) => {
       if (idMap.has(oldId) || count >= M.LIMITS.nodes) return null;
       const s = src[oldId];
@@ -227,6 +264,10 @@
       n.emoji = M.cleanEmoji(s.emoji);
       n.icon = typeof s.icon === 'string' && MM.ICONS && MM.ICONS[s.icon] ? s.icon : '';
       n.edge = cleanEdge(s.edge);
+      if (s.image && typeof s.image === 'object') {
+        const aid = useAsset(s.image.id);
+        if (aid) n.image = { id: aid, size: M.IMAGE_SIZES[s.image.size] ? s.image.size : 'M', ratio: U.clamp(num(s.image.ratio, 1), 0.2, 5) };
+      }
       nodes[n.id] = n;
       const kids = Array.isArray(s.children) ? s.children : [];
       for (const k of kids) {
@@ -262,6 +303,7 @@
       nodes,
       view: v,
       links,
+      assets,
       arrows: raw.arrows === true,
       autoLayout: raw.autoLayout === true,
     };

@@ -220,6 +220,12 @@ textarea { height: auto; padding: 8px 10px; width: 100%; resize: vertical; min-h
 .el-grid .btn svg { width: 22px; height: 22px; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .el-grid .btn[aria-pressed="true"] { border-color: var(--accent); }
 .el-row input { height: 34px; }
+.photo-size { margin-top: 8px; }
+.canvas-wrap.file-over::after {
+  content: "Solte a imagem sobre um tópico"; position: absolute; inset: 12px; border: 2px dashed var(--accent);
+  border-radius: 14px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 20px;
+  color: var(--accent); font-weight: 600; pointer-events: none; background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
 .insp-body section > input[type="text"] { width: 100%; margin-bottom: 8px; }
 .insp-body section .segmented + .segmented { margin-top: 6px; }
 .menu .check { margin-left: auto; visibility: hidden; color: var(--accent); }

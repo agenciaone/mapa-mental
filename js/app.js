@@ -291,6 +291,57 @@
   }
 
   // ---------- emoji / ícone do tópico ----------
+  // ---------- foto do tópico ----------
+  async function attachImage(id, blob) {
+    const n = id && S.map.nodes[id];
+    if (!n) { D.toast('Selecione um tópico para receber a foto.'); return; }
+    if (S.editing) commitEdit();
+    setStatus('Processando foto…');
+    let img;
+    try {
+      img = await U.processImage(blob, 800);
+    } catch (e) {
+      setStatus('Salvo');
+      D.toast(e.message, 'error');
+      return;
+    }
+    if (img.dataUrl.length > M.LIMITS.image) { setStatus('Salvo'); D.toast('Imagem muito pesada mesmo após reduzir.', 'error'); return; }
+    if (!S.map.nodes[id]) return;
+    change(() => resizeKeepingTop(id, () => {
+      const aid = M.addAsset(S.map, img.dataUrl);
+      n.image = { id: aid, size: (n.image && n.image.size) || 'M', ratio: U.clamp(img.ratio, 0.2, 5) };
+    }));
+    S.sel = id;
+    render();
+    if (Store.kind === 'localStorage') D.toast('Atenção: neste modo (arquivo aberto direto) o espaço para fotos é pequeno. Prefira abrir pelo endereço do app.');
+  }
+
+  async function pickImage() {
+    if (!S.sel) { D.toast('Selecione um tópico para receber a foto.'); return; }
+    const id = S.sel;
+    const file = await U.pickFile('image/png,image/jpeg,image/webp,image/gif');
+    if (file) attachImage(id, file);
+  }
+
+  function setImage(update) {
+    const n = S.sel && S.map.nodes[S.sel];
+    if (!n || !n.image) return;
+    change(() => resizeKeepingTop(n.id, () => { n.image = update === null ? null : Object.assign({}, n.image, update); }));
+  }
+
+  /**
+   * Para mudanças grandes de altura (fotos): mantém a borda de cima no lugar,
+   * cresce para baixo e empurra os tópicos de baixo.
+   */
+  function resizeKeepingTop(id, mutate) {
+    const n = S.map.nodes[id];
+    const oldH = L.box(S.map, id).h;
+    keepAnchor(id, mutate);
+    if (S.map.autoLayout) return;
+    n.y += (L.box(S.map, id).h - oldH) / 2;
+    L.makeRoom(S.map, id);
+  }
+
   function setElement(kind, value) {
     const n = S.sel && S.map.nodes[S.sel];
     if (!n) return;
@@ -736,6 +787,36 @@
   svg.addEventListener('lostpointercapture', (e) => { if (S.pointers.has(e.pointerId)) onPointerEnd(e); });
   svg.addEventListener('contextmenu', (e) => e.preventDefault());
 
+  // ---------- fotos: arrastar arquivo e colar ----------
+  const wrap = $('canvasWrap');
+  const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+  wrap.addEventListener('dragover', (e) => {
+    if (!hasFiles(e) || !S.map) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    wrap.classList.add('file-over');
+  });
+  wrap.addEventListener('dragleave', (e) => { if (!wrap.contains(e.relatedTarget)) wrap.classList.remove('file-over'); });
+  wrap.addEventListener('drop', (e) => {
+    if (!hasFiles(e) || !S.map) return;
+    e.preventDefault();
+    wrap.classList.remove('file-over');
+    const file = [...e.dataTransfer.files].find((f) => f.type.startsWith('image/'));
+    if (!file) { D.toast('Solte um arquivo de imagem (JPG, PNG, WebP ou GIF).', 'error'); return; }
+    const w = toWorld(e.clientX, e.clientY);
+    attachImage(hitNode(w.x, w.y) || S.sel, file);
+  });
+
+  document.addEventListener('paste', (e) => {
+    if (!S.map || D.isOpen() || S.editing) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    const item = e.clipboardData && [...e.clipboardData.items].find((i) => i.kind === 'file' && i.type.startsWith('image/'));
+    if (!item) return;
+    e.preventDefault();
+    attachImage(S.sel, item.getAsFile());
+  });
+
   svg.addEventListener('wheel', (e) => {
     e.preventDefault();
     if (!S.map) return;
@@ -1037,6 +1118,11 @@
     emIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyEmoji(); } });
     $('btnElClear').addEventListener('click', () => { emIn.value = ''; setElement(null); });
 
+    // ---- foto ----
+    $('btnAddPhoto').addEventListener('click', pickImage);
+    $('btnRemovePhoto').addEventListener('click', () => setImage(null));
+    for (const b of $('photoSizeSeg').children) b.addEventListener('click', () => setImage({ size: b.getAttribute('data-v') }));
+
     // ---- seta que chega no tópico ----
     const edgeLabel = $('edgeLabelInput');
     const applyEdgeLabel = () => { if (S.sel) setEdge(S.sel, 'label', edgeLabel.value.trim().slice(0, M.LIMITS.label)); };
@@ -1102,6 +1188,11 @@
     for (const b of $('iconGrid').children) b.setAttribute('aria-pressed', String(b.getAttribute('data-v') === n.icon));
     if (document.activeElement !== $('emojiInput')) $('emojiInput').value = n.emoji && !MM.EMOJIS.includes(n.emoji) ? n.emoji : '';
     $('btnElClear').disabled = !n.emoji && !n.icon;
+    const hasImg = !!(n.image && S.map.assets && S.map.assets[n.image.id]);
+    $('btnAddPhoto').querySelector('span').textContent = hasImg ? 'Trocar foto' : 'Adicionar foto';
+    $('btnRemovePhoto').disabled = !hasImg;
+    $('photoSizeSeg').hidden = !hasImg;
+    if (hasImg) pressSeg($('photoSizeSeg'), n.image.size);
     $('edgeSection').hidden = !n.parent;
     if (n.parent) {
       const e = n.edge || {};
@@ -1213,8 +1304,13 @@
     if (!m) return;
     if (S.editing) commitEdit();
     saveSoon.flush();
+    // sem histórico de desfazer, fotos que nenhum tópico usa podem ser apagadas
+    const prev = S.map;
+    if (prev && prev !== m && M.gcAssets(prev)) Store.putMap(prev).catch(() => {});
+    if (M.gcAssets(m)) Store.putMap(m).catch(() => {});
     S.map = m;
     S.sel = null;
+    S.selLink = null;
     S.history.clear();
     if (m.autoLayout == null) m.autoLayout = false;
     Store.setMeta('lastMap', id).catch(() => {});
@@ -1568,7 +1664,7 @@
       ['Duplo clique / F2', 'Editar texto'], ['Digitar qualquer letra', 'Substituir texto do tópico'], ['Shift + Enter (editando)', 'Nova linha'],
       ['Esc', 'Cancelar edição / tirar seleção'], ['Espaço', 'Recolher / expandir'], ['Setas', 'Selecionar tópico vizinho'],
       ['Ctrl + Z', 'Desfazer'], ['Ctrl + Y / Ctrl + Shift + Z', 'Refazer'], ['Ctrl + D', 'Duplicar ramificação'],
-      ['Ctrl + L', 'Reorganizar ramificação'], ['Ctrl + K', 'Conectar a outro tópico com uma seta'], ['Duplo clique na seta', 'Escrever rótulo da seta'], ['Ctrl + 0', 'Centralizar mapa'], ['+ / −  ou roda do mouse', 'Zoom'],
+      ['Ctrl + L', 'Reorganizar ramificação'], ['Ctrl + K', 'Conectar a outro tópico com uma seta'], ['Ctrl + V', 'Colar foto no tópico selecionado'], ['Duplo clique na seta', 'Escrever rótulo da seta'], ['Ctrl + 0', 'Centralizar mapa'], ['+ / −  ou roda do mouse', 'Zoom'],
       ['Shift + roda', 'Mover na horizontal'], ['Arrastar o fundo', 'Mover a tela'], ['Arrastar tópico sobre outro', 'Mudar de pai'],
       ['Ctrl + E', 'Exportar PDF / PNG'], ['Ctrl + S', 'Salvar agora (o salvamento já é automático)'], ['Ctrl + O', 'Meus mapas'],
     ];
@@ -1619,7 +1715,7 @@
   }
 
   // API para testes automatizados e depuração
-  MM.app = { S, startConnect, finishConnect, selectLink, setElement, setEdge, setLink, deleteLink, addChild, addSibling, deleteSelected, undo, redo, select, startEdit, commitEdit, toggleCollapse, layoutSelected, fitView, openMap, createBackup, restoreBackup, openExport, setTheme, renderNow };
+  MM.app = { S, attachImage, setImage, startConnect, finishConnect, selectLink, setElement, setEdge, setLink, deleteLink, addChild, addSibling, deleteSelected, undo, redo, select, startEdit, commitEdit, toggleCollapse, layoutSelected, fitView, openMap, createBackup, restoreBackup, openExport, setTheme, renderNow };
 
   init().catch((e) => {
     console.error(e);

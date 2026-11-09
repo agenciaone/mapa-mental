@@ -72,7 +72,9 @@
     const t = L.typo(map, id);
     const icons = (n.note ? 1 : 0) + (n.link ? 1 : 0);
     const element = n.icon && MM.ICONS[n.icon] ? 'icon' : n.emoji ? 'emoji' : null;
-    const key = [n.text, t.shape, t.fontSize, t.bold, t.italic, t.depth === 0, icons, element, n.emoji].join('\u0001');
+    const image = n.image && map.assets && map.assets[n.image.id] ? n.image : null;
+    const key = [n.text, t.shape, t.fontSize, t.bold, t.italic, t.depth === 0, icons, element, n.emoji,
+      image ? image.size + ':' + image.ratio.toFixed(3) : ''].join('\u0001');
     let g = cache.get(key);
     if (g) return g;
 
@@ -97,13 +99,28 @@
     if (t.shape === 'underline' || t.shape === 'none') { padX = 6; padY = 5; }
     if (t.shape === 'pill') padX += Math.round(lineH * 0.25);
 
-    let w = Math.ceil(textW + elW + iconW + padX * 2);
-    let h = Math.ceil(textH + padY * 2);
+    const rowW = textW + elW + iconW;
+    let w, h, imgW = 0, imgH = 0, contentH = textH;
+    const rowEmpty = !!image && !n.text.trim() && !element && !icons;
+    if (image) {
+      // foto em cima; texto/elemento embaixo, se houver
+      imgW = M.IMAGE_SIZES[image.size] || M.IMAGE_SIZES.M;
+      imgH = Math.round(Math.min(imgW * image.ratio, imgW * 1.6));
+      padX = Math.max(padX, 8); padY = Math.max(padY, 8);
+      contentH = imgH + (rowEmpty ? 0 : 8 + textH);
+      w = Math.ceil(Math.max(rowEmpty ? 0 : rowW, imgW) + padX * 2);
+    } else {
+      w = Math.ceil(rowW + padX * 2);
+    }
+    h = Math.ceil(contentH + padY * 2);
     if (t.shape === 'ellipse') { w = Math.ceil(w * 1.22); h = Math.ceil(h * 1.32); }
     if (t.shape === 'hexagon') w = Math.ceil(w + h * 0.5);
     w = Math.max(w, 36);
+    const imgY = (h - contentH) / 2;
+    const rowCY = image ? imgY + imgH + 8 + textH / 2 : h / 2;
 
-    g = { w, h, lines, lineH, fontSize: fs, bold: t.bold, italic: t.italic, shape: t.shape, depth: t.depth, iconSize, iconW, textW, icons, element, elementOnly, elSize, elW };
+    g = { w, h, lines, lineH, fontSize: fs, bold: t.bold, italic: t.italic, shape: t.shape, depth: t.depth, iconSize, iconW, textW, icons, element, elementOnly, elSize, elW,
+      image: !!image, imgW, imgH, imgX: (w - imgW) / 2, imgY, rowCY };
     if (cache.size > 4000) cache.clear();
     cache.set(key, g);
     return g;
@@ -268,7 +285,7 @@
       const side = M.side(map, cur);
       let box = L.subtreeBBox(map, cur);
       const below = p.children
-        .filter((c) => c !== cur && M.side(map, c) === side && map.nodes[c].y > map.nodes[cur].y)
+        .filter((c) => c !== cur && M.side(map, c) === side && L.rect(map, c).y > L.rect(map, cur).y)
         .sort((a, b) => map.nodes[a].y - map.nodes[b].y);
       for (const s of below) {
         const sb = L.subtreeBBox(map, s);

@@ -1,6 +1,6 @@
 'use strict';
 // Service worker: guarda todos os arquivos do app para uso sem internet.
-const CACHE = 'mapas-mentais-v2';
+const CACHE = 'mapas-mentais-v3';
 const ASSETS = [
   './',
   './index.html',

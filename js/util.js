@@ -141,6 +141,44 @@ window.MM = window.MM || {};
 
   U.contrastText = (hex) => (U.luminance(hex) > 0.4 ? '#1b2027' : '#ffffff');
 
+  /**
+   * Lê uma imagem (arquivo ou colada), reduz para no máximo `maxSide` px e
+   * devolve um data URL compacto. PNG só quando há transparência.
+   */
+  U.processImage = async function (blob, maxSide) {
+    maxSide = maxSide || 800;
+    if (!blob || !/^image\/(png|jpeg|webp|gif|bmp)$/i.test(blob.type)) throw new Error('Formato não suportado. Use JPG, PNG, WebP ou GIF.');
+    if (blob.size > 25 * 1024 * 1024) throw new Error('Imagem muito grande (máx. 25 MB).');
+    const url = URL.createObjectURL(blob);
+    let img;
+    try {
+      img = await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error('Não foi possível ler a imagem.'));
+        i.src = url;
+      });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+    const w0 = img.naturalWidth, h0 = img.naturalHeight;
+    if (!w0 || !h0) throw new Error('Imagem vazia.');
+    const s = Math.min(1, maxSide / Math.max(w0, h0));
+    const w = Math.max(1, Math.round(w0 * s)), h = Math.max(1, Math.round(h0 * s));
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    let alpha = false;
+    if (!/jpeg/i.test(blob.type)) {
+      const d = ctx.getImageData(0, 0, w, h).data;
+      for (let i = 3; i < d.length; i += 16) if (d[i] < 250) { alpha = true; break; }
+    }
+    let dataUrl = alpha ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.85);
+    if (alpha && dataUrl.length > 2.5 * 1024 * 1024) dataUrl = c.toDataURL('image/webp', 0.85);
+    return { dataUrl, ratio: h / w };
+  };
+
   U.clone = (o) => (typeof structuredClone === 'function' ? structuredClone(o) : JSON.parse(JSON.stringify(o)));
 
   MM.U = U;
