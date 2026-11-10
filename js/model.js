@@ -8,28 +8,44 @@
   M.VERSION = 1;
   M.SHAPES = ['rounded', 'rect', 'pill', 'ellipse', 'hexagon', 'underline', 'none'];
   M.BORDERS = ['solid', 'dashed', 'dotted', 'none'];
-  M.LIMITS = { text: 2000, note: 20000, name: 120, nodes: 5000, links: 2000, label: 120, emoji: 16 };
+  M.LIMITS = { text: 2000, note: 20000, name: 120, nodes: 5000, links: 2000, label: 120, emoji: 16, shapes: 200, stages: 12 };
   M.ARROWS = ['end', 'both', 'none'];
+  /** mind: mapa mental (dois lados) · flow: fluxo da esquerda para a direita · org: organograma de cima para baixo */
+  M.STRUCTURES = ['mind', 'flow', 'org'];
+  M.STAGE_COLORS = ['#1c7ed6', '#0c8599', '#2f9e44', '#e67700', '#d6336c', '#6741d9'];
 
   M.newNode = function (text, parent) {
     return { id: U.uid(), text: text == null ? '' : String(text), parent: parent || null, children: [], x: 0, y: 0, collapsed: false, style: {}, note: '', link: '', emoji: '', icon: '', edge: {}, image: null };
   };
 
-  M.createMap = function (name, rootText) {
+  M.createMap = function (name, rootText, structure) {
     const root = M.newNode(rootText || 'Tópico central', null);
     const now = Date.now();
     return {
       id: U.uid(), name: name || 'Novo mapa', created: now, updated: now,
       rootId: root.id, nodes: { [root.id]: root }, view: null, links: [], arrows: false, assets: {},
+      structure: M.STRUCTURES.includes(structure) ? structure : 'mind', shapes: [],
     };
   };
 
   M.get = (map, id) => map.nodes[id];
   M.isRoot = (map, id) => map.rootId === id;
+  /** Tópico solto: sem pai e que não é o tópico central. */
+  M.isFree = (map, id) => !!map.nodes[id] && !map.nodes[id].parent && id !== map.rootId;
+  M.structure = (map) => (M.STRUCTURES.includes(map.structure) ? map.structure : 'mind');
 
+  /** Tópico central primeiro, depois os tópicos soltos (cada um com sua ramificação). */
+  M.roots = function (map) {
+    const out = [map.rootId];
+    for (const id in map.nodes) if (id !== map.rootId && !map.nodes[id].parent) out.push(id);
+    return out;
+  };
+
+  /** Profundidade visual: o central é 0; um tópico solto conta como 1 (parece um tópico principal). */
   M.depth = function (map, id) {
     let d = 0, n = map.nodes[id];
     while (n && n.parent) { d++; n = map.nodes[n.parent]; }
+    if (n && n.id !== map.rootId) d++;
     return d;
   };
 
@@ -64,7 +80,7 @@
       out.push(id);
       if (!n.collapsed || expandAll) n.children.forEach(walk);
     };
-    walk(map.rootId);
+    for (const r of M.roots(map)) walk(r);
     return out;
   };
 
@@ -102,13 +118,56 @@
     if (id === map.rootId || id === newParentId || M.isDescendant(map, newParentId, id)) return false;
     const n = map.nodes[id];
     const old = map.nodes[n.parent];
-    old.children = old.children.filter((c) => c !== id);
+    if (old) old.children = old.children.filter((c) => c !== id);
     const np = map.nodes[newParentId];
     if (index == null || index < 0 || index > np.children.length) np.children.push(id);
     else np.children.splice(index, 0, id);
     n.parent = newParentId;
     np.collapsed = false;
     return true;
+  };
+
+  /** Solta um tópico (com sua ramificação) do pai: vira um tópico solto. */
+  M.detach = function (map, id) {
+    const n = map.nodes[id];
+    if (!n || !n.parent) return false;
+    const p = map.nodes[n.parent];
+    if (p) p.children = p.children.filter((c) => c !== id);
+    n.parent = null;
+    n.edge = {};
+    return true;
+  };
+
+  M.addFree = function (map, text, x, y) {
+    const n = M.newNode(text, null);
+    n.x = x; n.y = y;
+    map.nodes[n.id] = n;
+    return n;
+  };
+
+  // ---------- formas de fundo (funil) ----------
+  M.newFunnel = function (x, y, labels) {
+    labels = labels || ['Topo · Atrair', 'Meio · Engajar', 'Fundo · Converter'];
+    return {
+      id: U.uid(), kind: 'funnel', x, y, w: 620, stageH: 130, taper: 0.32,
+      stages: labels.map((label, i) => ({ label, color: M.STAGE_COLORS[i % M.STAGE_COLORS.length] })),
+    };
+  };
+  M.getShape = (map, id) => (map.shapes || []).find((s) => s.id === id);
+  M.removeShape = function (map, id) {
+    const n = (map.shapes || []).length;
+    map.shapes = (map.shapes || []).filter((s) => s.id !== id);
+    return map.shapes.length !== n;
+  };
+  M.shapeHeight = (s) => s.stages.length * s.stageH;
+  /** Meia largura do funil na altura y (coordenadas do mapa). */
+  M.funnelHalfW = function (s, y) {
+    const t = U.clamp((y - s.y) / (M.shapeHeight(s) || 1), 0, 1);
+    return s.w / 2 * (1 - (1 - s.taper) * t);
+  };
+  M.inShape = function (s, x, y) {
+    if (y < s.y || y > s.y + M.shapeHeight(s)) return false;
+    return Math.abs(x - s.x) <= M.funnelHalfW(s, y);
   };
 
   M.moveSubtree = function (map, id, dx, dy) {
@@ -170,13 +229,17 @@
   };
 
   // ---------- serialização / histórico ----------
-  M.snapshot = (map) => JSON.stringify({ rootId: map.rootId, nodes: map.nodes, links: map.links || [], arrows: !!map.arrows });
+  M.snapshot = (map) => JSON.stringify({ rootId: map.rootId, nodes: map.nodes, links: map.links || [], arrows: !!map.arrows,
+    shapes: map.shapes || [], structure: M.structure(map), autoLayout: !!map.autoLayout });
   M.restore = function (map, snap) {
     const o = JSON.parse(snap);
     map.rootId = o.rootId;
     map.nodes = o.nodes;
     map.links = o.links || [];
     map.arrows = !!o.arrows;
+    map.shapes = o.shapes || [];
+    map.structure = o.structure || 'mind';
+    map.autoLayout = !!o.autoLayout;
   };
 
   M.History = class {
@@ -278,6 +341,25 @@
       return n.id;
     };
     const newRoot = walk(rootId, null);
+    // tópicos soltos (sem pai) e suas ramificações
+    for (const k of Object.keys(src)) {
+      const s = src[k];
+      if (k !== rootId && s && typeof s === 'object' && !s.parent && !idMap.has(k)) walk(k, null);
+    }
+    const shapes = [];
+    for (const s of Array.isArray(raw.shapes) ? raw.shapes.slice(0, M.LIMITS.shapes) : []) {
+      if (!s || typeof s !== 'object' || s.kind !== 'funnel' || !Array.isArray(s.stages)) continue;
+      const stages = s.stages.slice(0, M.LIMITS.stages).filter((o) => o && typeof o === 'object').map((o, i) => ({
+        label: str(o.label, M.LIMITS.label).replace(/[\r\n]+/g, ' ').trim(),
+        color: U.isHex(o.color) ? o.color.toLowerCase() : M.STAGE_COLORS[i % M.STAGE_COLORS.length],
+      }));
+      if (!stages.length) continue;
+      shapes.push({
+        id: U.uid(), kind: 'funnel', x: num(s.x, 0), y: num(s.y, 0),
+        w: U.clamp(num(s.w, 620), 160, 6000), stageH: U.clamp(num(s.stageH, 130), 40, 2000),
+        taper: U.clamp(num(s.taper, 0.32), 0.1, 1), stages,
+      });
+    }
     const now = Date.now();
     const links = [];
     for (const l of Array.isArray(raw.links) ? raw.links.slice(0, M.LIMITS.links) : []) {
@@ -306,6 +388,8 @@
       assets,
       arrows: raw.arrows === true,
       autoLayout: raw.autoLayout === true,
+      structure: M.STRUCTURES.includes(raw.structure) ? raw.structure : 'mind',
+      shapes,
     };
   };
 

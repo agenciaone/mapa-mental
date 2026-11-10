@@ -127,15 +127,13 @@
   };
 
   L.LABEL_FONT = `600 12px ${L.FONT}`;
+  L.textWidth = function (text, font) {
+    ctx.font = font;
+    return ctx.measureText(text).width;
+  };
   L.labelWidth = function (text) {
     ctx.font = L.LABEL_FONT;
     return ctx.measureText(text).width;
-  };
-
-  /** Distância horizontal entre pai e filho; cresce quando a seta tem rótulo. */
-  L.edgeGap = function (map, id) {
-    const e = map.nodes[id].edge;
-    return e && e.label ? Math.max(L.HGAP, L.labelWidth(e.label) * 1.2 + 70) : L.HGAP;
   };
 
   L.rect = function (map, id) {
@@ -168,63 +166,148 @@
   L.subtreeBBox = (map, id) => L.bbox(map, visibleSubtree(map, id));
 
   // ---------- organização em árvore ----------
+  // Eixo principal (m): direção pai → filho. Eixo cruzado (c): onde os irmãos se empilham.
+  // Mapa mental e fluxo: principal = x. Organograma: principal = y.
+  const AX_H = { m: 'x', c: 'y', ms: 'w', cs: 'h' };
+  const AX_V = { m: 'y', c: 'x', ms: 'h', cs: 'w' };
+  L.axis = (map) => (M.structure(map) === 'org' ? AX_V : AX_H);
+  /** Fluxo e organograma crescem para um lado só. */
+  L.oneSided = (map) => M.structure(map) !== 'mind';
+
+  /** Lado do tópico em relação ao pai no eixo principal: 1 ou -1. */
+  L.side = function (map, id) {
+    const A = L.axis(map);
+    const n = map.nodes[id];
+    if (!n) return 1;
+    if (!n.parent) {
+      const f = map.nodes[n.children[0]];
+      if (f && Math.abs(f[A.m] - n[A.m]) > 1) return f[A.m] > n[A.m] ? 1 : -1;
+      return 1;
+    }
+    const p = map.nodes[n.parent];
+    if (Math.abs(n[A.m] - p[A.m]) < 1) return L.side(map, p.id);
+    return n[A.m] >= p[A.m] ? 1 : -1;
+  };
+
+  /** Distância entre pai e filho no eixo principal; cresce quando a seta tem rótulo. */
+  L.edgeGap = function (map, id) {
+    const e = map.nodes[id].edge;
+    if (L.axis(map) === AX_V) return e && e.label ? 78 : 48;
+    return e && e.label ? Math.max(L.HGAP, L.labelWidth(e.label) * 1.2 + 70) : L.HGAP;
+  };
+
+  /** Espaço entre irmãos no eixo cruzado. */
   function vgap(map, id) {
     const n = map.nodes[id];
+    if (L.axis(map) === AX_V) return M.isRoot(map, n.parent) ? 34 : 20;
     const base = M.isRoot(map, n.parent) ? L.ROOT_VGAP : L.VGAP;
     return n.edge && n.edge.label ? base + 16 : base; // espaço para o rótulo da seta
   }
+  L.crossGap = vgap;
 
-  function blockH(map, id) {
-    const n = map.nodes[id];
-    const h = L.box(map, id).h;
-    if (n.collapsed || !n.children.length) return h;
-    let sum = 0;
-    n.children.forEach((c, i) => { sum += blockH(map, c) + (i ? vgap(map, c) : 0); });
-    return Math.max(h, sum);
+  /** Tamanho do próprio tópico no eixo cruzado (no organograma, o rótulo da seta também ocupa). */
+  function selfCross(map, id, A) {
+    const b = L.box(map, id);
+    const e = map.nodes[id].edge;
+    if (A === AX_V && e && e.label) return Math.max(b.w, L.labelWidth(e.label) + 24);
+    return b[A.cs];
   }
 
-  function place(map, id, x, y, side) {
+  // Organograma compacto: quando todos os filhos são finais, eles ficam numa lista
+  // vertical sob o pai, ligados por um tronco à esquerda (evita organogramas larguíssimos).
+  const LIST_INDENT = 30, LIST_GAP = 10, LIST_TOP = 16;
+  L.isList = function (map, id) {
+    if (L.axis(map) !== AX_V || M.isRoot(map, id)) return false;
     const n = map.nodes[id];
-    const dx = x - n.x, dy = y - n.y;
-    n.x = x; n.y = y;
+    if (!n || n.collapsed || !n.children.length) return false;
+    return n.children.every((c) => { const k = map.nodes[c]; return k.collapsed || !k.children.length; });
+  };
+  function listWidth(map, id) {
+    let w = L.box(map, id).w;
+    for (const c of map.nodes[id].children) w = Math.max(w, LIST_INDENT + selfCross(map, c, AX_V));
+    return w;
+  }
+  /** Deslocamento do pai dentro da sua faixa (a lista fica alinhada à esquerda do pai). */
+  function crossOffset(map, id, A) {
+    return L.isList(map, id) ? (L.box(map, id).w - listWidth(map, id)) / 2 : 0;
+  }
+  function placeList(map, id) {
+    const n = map.nodes[id];
+    const b = L.box(map, id);
+    const left = n.x - b.w / 2;
+    let y = n.y + b.h / 2 + LIST_TOP;
+    for (const c of n.children) {
+      const k = map.nodes[c];
+      const kb = L.box(map, c);
+      const nx = left + LIST_INDENT + kb.w / 2, ny = y + kb.h / 2;
+      M.moveSubtree(map, c, nx - k.x, ny - k.y);
+      y += kb.h + LIST_GAP;
+    }
+  }
+
+  function block(map, id, A) {
+    const n = map.nodes[id];
+    const own = selfCross(map, id, A);
+    if (L.isList(map, id)) return listWidth(map, id);
+    if (n.collapsed || !n.children.length) return own;
+    let sum = 0;
+    n.children.forEach((c, i) => { sum += block(map, c, A) + (i ? vgap(map, c) : 0); });
+    return Math.max(own, sum);
+  }
+
+  function place(map, id, m, c, side, A) {
+    const n = map.nodes[id];
+    const dm = m - n[A.m], dc = c - n[A.c];
+    n[A.m] = m; n[A.c] = c;
     if (n.collapsed) {
       // descendentes escondidos acompanham o pai
-      for (const sid of M.subtreeIds(map, id)) if (sid !== id) { map.nodes[sid].x += dx; map.nodes[sid].y += dy; }
+      for (const sid of M.subtreeIds(map, id)) if (sid !== id) { map.nodes[sid][A.m] += dm; map.nodes[sid][A.c] += dc; }
       return;
     }
     if (!n.children.length) return;
-    n.children.sort((a, b) => map.nodes[a].y - map.nodes[b].y);
-    stack(map, id, n.children, x, y, side);
+    if (L.isList(map, id)) {
+      n.children.sort((a, b) => map.nodes[a].y - map.nodes[b].y);
+      placeList(map, id);
+      return;
+    }
+    n.children.sort((a, b) => map.nodes[a][A.c] - map.nodes[b][A.c]);
+    stack(map, id, n.children, m, c, side, A);
   }
 
-  function stack(map, parentId, kids, x, y, side) {
-    const pw = L.box(map, parentId).w;
-    const heights = kids.map((c) => blockH(map, c));
-    const gaps = kids.map((c, i) => (i ? vgap(map, c) : 0));
-    const total = heights.reduce((a, b) => a + b, 0) + gaps.reduce((a, b) => a + b, 0);
-    let cy = y - total / 2;
-    kids.forEach((c, i) => {
-      cy += gaps[i];
-      const cw = L.box(map, c).w;
-      place(map, c, x + side * (pw / 2 + L.edgeGap(map, c) + cw / 2), cy + heights[i] / 2, side);
-      cy += heights[i];
+  function stack(map, parentId, kids, m, c, side, A) {
+    const pm = L.box(map, parentId)[A.ms];
+    const sizes = kids.map((k) => block(map, k, A));
+    const gaps = kids.map((k, i) => (i ? vgap(map, k) : 0));
+    const total = sizes.reduce((a, b) => a + b, 0) + gaps.reduce((a, b) => a + b, 0);
+    let cur = c - total / 2;
+    kids.forEach((k, i) => {
+      cur += gaps[i];
+      const km = L.box(map, k)[A.ms];
+      place(map, k, m + side * (pm / 2 + L.edgeGap(map, k) + km / 2), cur + sizes[i] / 2 + crossOffset(map, k, A), side, A);
+      cur += sizes[i];
     });
   }
 
   /** Reorganiza uma ramificação mantendo a posição do próprio tópico. */
   L.layoutSubtree = function (map, id, rebalance) {
+    const A = L.axis(map);
     const n = map.nodes[id];
     if (!M.isRoot(map, id)) {
-      place(map, id, n.x, n.y, M.side(map, id));
+      place(map, id, n[A.m], n[A.c], L.oneSided(map) && !n.parent ? 1 : L.side(map, id), A);
       return;
     }
     if (n.collapsed) n.collapsed = false;
+    if (L.oneSided(map)) {
+      n.children.sort((a, b) => map.nodes[a][A.c] - map.nodes[b][A.c]);
+      stack(map, id, n.children, n[A.m], n[A.c], 1, A);
+      return;
+    }
     let right = [], left = [];
     const allCentered = n.children.every((c) => Math.abs(map.nodes[c].x - n.x) < 1);
     if (rebalance || allCentered) {
       let hr = 0, hl = 0;
       for (const c of n.children) {
-        const h = blockH(map, c);
+        const h = block(map, c, A);
         if (hr <= hl) { right.push(c); hr += h; } else { left.push(c); hl += h; }
       }
     } else {
@@ -232,68 +315,101 @@
       const byY = (a, b) => map.nodes[a].y - map.nodes[b].y;
       right.sort(byY); left.sort(byY);
     }
-    stack(map, id, right, n.x, n.y, 1);
-    stack(map, id, left, n.x, n.y, -1);
+    stack(map, id, right, n.x, n.y, 1, A);
+    stack(map, id, left, n.x, n.y, -1, A);
     n.children = right.concat(left);
   };
 
-  L.layoutAll = (map, rebalance) => L.layoutSubtree(map, map.rootId, rebalance);
+  /** Reorganiza o tópico central e cada tópico solto (que ficam onde estão). */
+  L.layoutAll = function (map, rebalance) {
+    for (const r of M.roots(map)) L.layoutSubtree(map, r, rebalance);
+  };
 
   /** Posiciona um novo filho próximo dos irmãos, sem reorganizar o resto. */
   L.placeNewChild = function (map, id) {
+    const A = L.axis(map);
     const n = map.nodes[id];
     const p = map.nodes[n.parent];
     const pb = L.box(map, p.id);
     const b = L.box(map, id);
     let side;
     const sibs = p.children.filter((c) => c !== id);
-    if (M.isRoot(map, p.id)) {
+    if (M.isRoot(map, p.id) && !L.oneSided(map)) {
       let hr = 0, hl = 0;
-      for (const c of sibs) { if (map.nodes[c].x >= p.x) hr += blockH(map, c); else hl += blockH(map, c); }
+      for (const c of sibs) { if (map.nodes[c].x >= p.x) hr += block(map, c, A); else hl += block(map, c, A); }
       side = hr <= hl ? 1 : -1;
+    } else if (!p.parent) {
+      side = L.oneSided(map) ? 1 : L.side(map, p.id);
     } else {
-      side = M.side(map, p.id);
+      side = L.side(map, p.id);
     }
-    const same = sibs.filter((c) => (map.nodes[c].x >= p.x ? 1 : -1) === side);
-    n.x = p.x + side * (pb.w / 2 + L.edgeGap(map, id) + b.w / 2);
+    if (L.isList(map, p.id)) {
+      // entra no fim da lista do pai
+      const pl = p.x - pb.w / 2;
+      let bottom = p.y + pb.h / 2 + LIST_TOP - LIST_GAP;
+      for (const c of sibs) { const r = L.subtreeBBox(map, c); bottom = Math.max(bottom, r.y + r.h); }
+      n.x = pl + LIST_INDENT + b.w / 2;
+      n.y = bottom + LIST_GAP + b.h / 2;
+      return;
+    }
+    const same = sibs.filter((c) => (map.nodes[c][A.m] >= p[A.m] ? 1 : -1) === side);
+    n[A.m] = p[A.m] + side * (pb[A.ms] / 2 + L.edgeGap(map, id) + b[A.ms] / 2);
     if (!same.length) {
-      n.y = p.y;
+      n[A.c] = p[A.c];
     } else {
-      let bottom = -Infinity;
-      for (const c of same) { const r = L.subtreeBBox(map, c); bottom = Math.max(bottom, r.y + r.h); }
-      n.y = bottom + vgap(map, id) + b.h / 2;
+      let end = -Infinity;
+      for (const c of same) { const r = L.subtreeBBox(map, c); end = Math.max(end, r[A.c] + r[A.cs]); }
+      n[A.c] = end + vgap(map, id) + selfCross(map, id, A) / 2;
     }
   };
 
-  /** Insere logo abaixo de um irmão de referência. */
+  /** Insere logo depois de um irmão de referência. */
   L.placeAfterSibling = function (map, id, refId) {
+    const A = L.axis(map);
     const n = map.nodes[id];
     const p = map.nodes[n.parent];
-    const side = M.side(map, refId);
+    const side = L.side(map, refId);
     const pb = L.box(map, p.id);
     const b = L.box(map, id);
     const r = L.subtreeBBox(map, refId);
-    n.x = p.x + side * (pb.w / 2 + L.edgeGap(map, id) + b.w / 2);
-    n.y = r.y + r.h + vgap(map, id) + b.h / 2;
+    if (L.isList(map, p.id)) {
+      // abre espaço na lista logo abaixo do irmão de referência
+      const ny = r.y + r.h + LIST_GAP + b.h / 2;
+      for (const c of p.children) if (c !== id && c !== refId && map.nodes[c].y > map.nodes[refId].y) M.moveSubtree(map, c, 0, b.h + LIST_GAP);
+      n.x = p.x - pb.w / 2 + LIST_INDENT + b.w / 2;
+      n.y = ny;
+      return;
+    }
+    n[A.m] = p[A.m] + side * (pb[A.ms] / 2 + L.edgeGap(map, id) + b[A.ms] / 2);
+    n[A.c] = r[A.c] + r[A.cs] + vgap(map, id) + selfCross(map, id, A) / 2;
   };
 
-  /** Empurra para baixo ramificações vizinhas que ficariam sobrepostas. */
+  /** Empurra (para baixo, ou para a direita no organograma) ramificações vizinhas que ficariam sobrepostas. */
   L.makeRoom = function (map, id) {
+    const A = L.axis(map);
+    const m = A.m, c = A.c, ms = A.ms, cs = A.cs;
     let cur = id;
     while (map.nodes[cur] && map.nodes[cur].parent) {
       const p = map.nodes[map.nodes[cur].parent];
-      const side = M.side(map, cur);
+      if (L.isList(map, p.id)) {
+        // lista do organograma: só reempilha os itens, sem mexer no resto
+        p.children.sort((a, b) => map.nodes[a].y - map.nodes[b].y);
+        placeList(map, p.id);
+        cur = p.id;
+        continue;
+      }
+      const side = L.side(map, cur);
       let box = L.subtreeBBox(map, cur);
-      const below = p.children
-        .filter((c) => c !== cur && M.side(map, c) === side && L.rect(map, c).y > L.rect(map, cur).y)
-        .sort((a, b) => map.nodes[a].y - map.nodes[b].y);
-      for (const s of below) {
+      const after = p.children
+        .filter((k) => k !== cur && L.side(map, k) === side && L.rect(map, k)[c] > L.rect(map, cur)[c])
+        .sort((a, b) => map.nodes[a][c] - map.nodes[b][c]);
+      for (const s of after) {
         const sb = L.subtreeBBox(map, s);
-        const hOverlap = sb.x < box.x + box.w && sb.x + sb.w > box.x;
-        const need = box.y + box.h + vgap(map, s) - sb.y;
-        if (hOverlap && need > 0) {
-          M.moveSubtree(map, s, 0, need);
-          sb.y += need;
+        const overlap = sb[m] < box[m] + box[ms] && sb[m] + sb[ms] > box[m];
+        const need = box[c] + box[cs] + vgap(map, s) - sb[c];
+        if (overlap && need > 0) {
+          M.moveSubtree(map, s, c === 'x' ? need : 0, c === 'y' ? need : 0);
+          sb[c] += need;
         }
         const x1 = Math.min(box.x, sb.x), y1 = Math.min(box.y, sb.y);
         const x2 = Math.max(box.x + box.w, sb.x + sb.w), y2 = Math.max(box.y + box.h, sb.y + sb.h);

@@ -27,9 +27,9 @@
     let n = map.nodes[id];
     while (n) {
       if (n.style && n.style.branch) return n.style.branch;
-      if (!n.parent) return theme.rootFill;
+      if (!n.parent) return n.id === map.rootId ? theme.rootFill : '#495057';
       const p = map.nodes[n.parent];
-      if (!p.parent) {
+      if (!p.parent && p.id === map.rootId) {
         const i = Math.max(0, p.children.indexOf(n.id));
         return R.PALETTE[i % R.PALETTE.length];
       }
@@ -71,7 +71,51 @@
 
   function edgeWidth(depth) { return depth <= 1 ? 3.2 : depth === 2 ? 2.2 : 1.6; }
 
+  const flat = (b) => b.shape === 'underline' || b.shape === 'none';
+
+  /**
+   * Linha em cotovelo (fluxo e organograma): sai do pai, desce/segue pelo tronco
+   * comum dos irmãos e entra reto no filho. Cantos arredondados.
+   */
+  function elbowPath(map, pid, cid) {
+    const A = L.axis(map);
+    const p = map.nodes[pid], c = map.nodes[cid];
+    const pb = L.box(map, pid), cb = L.box(map, cid);
+    if (A.m === 'y' && L.isList(map, pid)) {
+      // lista do organograma: tronco descendo pela esquerda do pai e entrando de lado no item
+      const tx = p.x - pb.w / 2 + 14, ty = p.y + pb.h / 2;
+      const ex = c.x - cb.w / 2, ey = flat(cb) ? c.y + cb.h / 2 : c.y;
+      const r = Math.min(8, Math.max(0, ey - ty) / 2, Math.max(0, ex - tx));
+      const d = `M${f(tx)} ${f(ty)}L${f(tx)} ${f(ey - r)}Q${f(tx)} ${f(ey)} ${f(tx + r)} ${f(ey)}L${f(ex)} ${f(ey)}`;
+      return { d, s: [tx, ty], e: [ex, ey], c1: [tx, ty + 12], c2: [ex - 12, ey], mid: [tx, (ty + ey) / 2] };
+    }
+    const P = A.m === 'x' ? (m, k) => [m, k] : (m, k) => [k, m];
+    const side = c[A.m] >= p[A.m] ? 1 : -1;
+    let sm = p[A.m] + side * pb[A.ms] / 2, sc = p[A.c];
+    if (A.m === 'x' && flat(pb)) sc = p.y + pb.h / 2;
+    if (A.m === 'x' && pb.depth === 0) sm = p.x + side * Math.max(0, pb.w / 2 - Math.min(pb.h / 2, 18));
+    const em = c[A.m] - side * cb[A.ms] / 2;
+    const ec = A.m === 'x' && flat(cb) ? c.y + cb.h / 2 : c[A.c];
+    const mm = sm + side * Math.min(A.m === 'x' ? 28 : 22, Math.abs(em - sm) / 2);
+    const dc = Math.sign(ec - sc);
+    const r = Math.min(10, Math.abs(ec - sc) / 2, Math.abs(mm - sm), Math.abs(em - mm));
+    const pt = (a) => `${f(a[0])} ${f(a[1])}`;
+    let d;
+    if (Math.abs(ec - sc) < 1 || r < 0.5) {
+      d = `M${pt(P(sm, sc))}L${pt(P(mm, sc))}L${pt(P(mm, ec))}L${pt(P(em, ec))}`;
+    } else {
+      d = `M${pt(P(sm, sc))}L${pt(P(mm - side * r, sc))}Q${pt(P(mm, sc))} ${pt(P(mm, sc + dc * r))}`
+        + `L${pt(P(mm, ec - dc * r))}Q${pt(P(mm, ec))} ${pt(P(mm + side * r, ec))}L${pt(P(em, ec))}`;
+    }
+    const g = { d, s: P(sm, sc), e: P(em, ec), c1: P(mm, sc), c2: P(em - side * 12, ec) };
+    if (Math.abs(ec - sc) < 1) g.c1 = P(sm + side * 12, sc);
+    // rótulo no trecho final, que é exclusivo deste filho
+    g.mid = P((mm + em) / 2, ec);
+    return g;
+  }
+
   function edgePath(map, pid, cid) {
+    if (M.structure(map) !== 'mind') return elbowPath(map, pid, cid);
     const p = map.nodes[pid], c = map.nodes[cid];
     const pb = L.box(map, pid), cb = L.box(map, cid);
     const side = c.x >= p.x ? 1 : -1;
@@ -210,7 +254,63 @@
     const n = map.nodes[id];
     const first = map.nodes[n.children[0]];
     if (first && Math.abs(first.x - n.x) > 1) return first.x > n.x ? 1 : -1;
-    return M.side(map, id);
+    return L.side(map, id);
+  }
+
+  // ---------- funil (forma de fundo com etapas) ----------
+  const STAGE_FONT = `700 13px ${L.FONT}`;
+  const stageLabelW = (t) => L.textWidth(t.toUpperCase(), STAGE_FONT) + t.length * 13 * 0.06;
+  /** Retângulo do funil; com `labels`, inclui os nomes das etapas à esquerda. */
+  R.shapeBBox = function (s, labels) {
+    const H = M.shapeHeight(s);
+    let x1 = s.x - s.w / 2;
+    if (labels) {
+      s.stages.forEach((st, i) => {
+        if (!st.label) return;
+        const yc = s.y + (i + 0.5) * s.stageH;
+        x1 = Math.min(x1, s.x - M.funnelHalfW(s, yc) - 16 - stageLabelW(st.label));
+      });
+    }
+    return { x: x1, y: s.y, w: s.x + s.w / 2 - x1, h: H };
+  };
+
+  function drawFunnel(layer, s, theme, opts) {
+    const g = U.s('g', { class: 'shape-funnel', 'data-shape': s.id });
+    const gap = 5;
+    s.stages.forEach((st, i) => {
+      const y0 = s.y + i * s.stageH + (i ? gap / 2 : 0);
+      const y1 = s.y + (i + 1) * s.stageH - (i < s.stages.length - 1 ? gap / 2 : 0);
+      const a = M.funnelHalfW(s, y0), b = M.funnelHalfW(s, y1);
+      const r = Math.min(12, s.stageH / 4);
+      const fill = U.mix(st.color, theme.bg, theme.name === 'dark' ? 0.72 : 0.82);
+      g.appendChild(U.s('path', {
+        d: `M${f(s.x - a + r)} ${f(y0)}H${f(s.x + a - r)}Q${f(s.x + a)} ${f(y0)} ${f(s.x + a - (a - b) * r / (y1 - y0))} ${f(y0 + r)}`
+          + `L${f(s.x + b)} ${f(y1)}H${f(s.x - b)}L${f(s.x - a + (a - b) * r / (y1 - y0))} ${f(y0 + r)}Q${f(s.x - a)} ${f(y0)} ${f(s.x - a + r)} ${f(y0)}Z`,
+        fill, stroke: st.color, 'stroke-width': 1.5, 'stroke-opacity': 0.55,
+      }));
+      if (st.label) {
+        // nome da etapa do lado de fora, à esquerda: o interior fica livre para os tópicos e setas
+        const yc = (y0 + y1) / 2;
+        const t = U.s('text', {
+          x: f(s.x - M.funnelHalfW(s, yc) - 16), y: f(yc + 4.5), 'text-anchor': 'end', 'font-family': L.FONT, 'font-size': 13,
+          'font-weight': 700, 'letter-spacing': '0.06em', fill: U.mix(st.color, theme.text, theme.name === 'dark' ? 0.15 : 0.35),
+        });
+        t.textContent = st.label.toUpperCase();
+        g.appendChild(t);
+      }
+    });
+    if (opts.interactive && opts.selectedShape === s.id) {
+      const bb = R.shapeBBox(s);
+      g.appendChild(U.s('rect', { x: f(bb.x - 8), y: f(bb.y - 8), width: f(bb.w + 16), height: f(bb.h + 16), rx: 14, fill: 'none', stroke: theme.accent, 'stroke-width': 2, 'stroke-dasharray': '7,5', 'pointer-events': 'none' }));
+      const hd = U.s('g', { class: 'resize', 'data-act': 'resize' });
+      hd.appendChild(U.s('circle', { cx: f(bb.x + bb.w + 8), cy: f(bb.y + bb.h + 8), r: 9, fill: theme.accent, stroke: theme.bg, 'stroke-width': 2 }));
+      hd.appendChild(U.s('path', { d: `M${f(bb.x + bb.w + 4)} ${f(bb.y + bb.h + 12)}L${f(bb.x + bb.w + 12)} ${f(bb.y + bb.h + 4)}`, stroke: theme.bg, 'stroke-width': 1.8, 'stroke-linecap': 'round' }));
+      const title = U.s('title');
+      title.textContent = 'Arraste para mudar o tamanho';
+      hd.appendChild(title);
+      g.appendChild(hd);
+    }
+    layer.appendChild(g);
   }
 
   /**
@@ -224,7 +324,9 @@
     const links = U.s('g', { class: 'links', fill: 'none', 'stroke-linecap': 'round' });
     const labels = U.s('g', { class: 'labels' });
     const nodes = U.s('g', { class: 'nodes' });
-    target.append(edges, links, labels, nodes);
+    const shapes = U.s('g', { class: 'shapes' });
+    target.append(shapes, edges, links, labels, nodes);
+    for (const s of map.shapes || []) if (s.kind === 'funnel') drawFunnel(shapes, s, theme, opts);
     const ids = M.visibleIds(map, opts.expandAll);
     const visible = new Set(ids);
     const dragSet = opts.draggingId ? new Set(M.subtreeIds(map, opts.draggingId)) : null;
@@ -333,10 +435,13 @@
         ix += b.iconSize + 4;
       }
 
-      if (n.parent && n.children.length && (opts.interactive || (n.collapsed && !opts.expandAll))) {
-        const side = toggleSide(map, id);
-        const cx = side > 0 ? b.w + 10 : -10;
-        const cy = (b.shape === 'underline' || b.shape === 'none') ? b.h : b.h / 2;
+      if (!M.isRoot(map, id) && n.children.length && (opts.interactive || (n.collapsed && !opts.expandAll))) {
+        let cx, cy;
+        if (M.structure(map) === 'org') { cx = L.isList(map, id) ? 14 : b.w / 2; cy = b.h + 10; }
+        else {
+          cx = toggleSide(map, id) > 0 ? b.w + 10 : -10;
+          cy = (b.shape === 'underline' || b.shape === 'none') ? b.h : b.h / 2;
+        }
         const collapsed = n.collapsed && !opts.expandAll;
         const tg = U.s('g', { class: 'toggle' + (collapsed ? '' : ' open'), 'data-act': 'toggle' });
         tg.appendChild(U.s('circle', { cx, cy, r: 9, fill: theme.toggleBg, stroke: col.branch, 'stroke-width': 1.6 }));
@@ -368,6 +473,11 @@
       const hw = l.label ? L.labelWidth(l.label) / 2 + 8 : 0;
       x1 = Math.min(x1, g.mid[0] - hw); x2 = Math.max(x2, g.mid[0] + hw);
       y1 = Math.min(y1, g.mid[1] - 12); y2 = Math.max(y2, g.mid[1] + 12);
+    }
+    for (const s of map.shapes || []) {
+      const r = R.shapeBBox(s, true);
+      x1 = Math.min(x1, r.x); y1 = Math.min(y1, r.y);
+      x2 = Math.max(x2, r.x + r.w); y2 = Math.max(y2, r.y + r.h);
     }
     const pad = 24;
     return { x: x1 - pad, y: y1 - pad, w: x2 - x1 + pad * 2, h: y2 - y1 + pad * 2 };

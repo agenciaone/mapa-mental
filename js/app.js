@@ -37,11 +37,13 @@
     if (!S.map) return;
     if (S.sel && !S.map.nodes[S.sel]) S.sel = null;
     if (S.selLink && !M.getLink(S.map, S.selLink)) S.selLink = null;
+    if (S.selShape && !M.getShape(S.map, S.selShape)) S.selShape = null;
     if (S.connect && !S.map.nodes[S.connect.from]) endConnect();
     R.draw(vp, S.map, theme(), {
       interactive: true,
       selectedId: S.sel,
       selectedLink: S.selLink,
+      selectedShape: S.selShape,
       dropId: S.drag && S.drag.dropId,
       draggingId: S.drag && S.drag.moved ? S.drag.id : null,
     });
@@ -186,13 +188,102 @@
   function select(id) {
     S.sel = id;
     S.selLink = null;
+    S.selShape = null;
     render();
   }
 
   function selectLink(id) {
     S.selLink = id;
     S.sel = null;
+    S.selShape = null;
     render();
+  }
+
+  function selectShape(id) {
+    S.selShape = id;
+    S.sel = null;
+    S.selLink = null;
+    render();
+  }
+
+  /** Centro da área visível, em coordenadas do mapa. */
+  function viewCenter() {
+    const r = svgRect();
+    return { x: (r.width / 2 - S.view.x) / S.view.k, y: (r.height / 2 - S.view.y) / S.view.k };
+  }
+
+  // ---------- tópicos soltos (fora da árvore, em qualquer lugar da tela) ----------
+  const FREE_COLORS = ['#495057', '#1c7ed6', '#2f9e44', '#e67700', '#ae3ec9', '#d6336c'];
+  function addFree(at) {
+    if (!S.map) return;
+    if (S.editing) commitEdit();
+    const p = at || viewCenter();
+    const id = change(() => {
+      const n = M.addFree(S.map, 'Texto', p.x, p.y);
+      const count = M.roots(S.map).length - 2;
+      n.style.branch = FREE_COLORS[Math.max(0, count) % FREE_COLORS.length];
+      return n.id;
+    }, { noAuto: true });
+    S.sel = id;
+    renderNow();
+    ensureVisible(id);
+    startEdit(id, undefined, true);
+  }
+
+  function detachSelected() {
+    const n = S.sel && S.map.nodes[S.sel];
+    if (!n || !n.parent) return;
+    change(() => {
+      M.detach(S.map, n.id);
+      if (!n.style.branch) n.style.branch = R.branchColor(S.map, n.id, theme());
+    }, { noAuto: true });
+    D.toast('O tópico agora está solto: arraste para onde quiser ou solte sobre outro tópico para ligá-lo de novo.');
+  }
+
+  // ---------- funil ----------
+  function addFunnel() {
+    if (!S.map) return;
+    if (S.editing) commitEdit();
+    const c = viewCenter();
+    const s = M.newFunnel(c.x, 0);
+    s.y = c.y - M.shapeHeight(s) / 2;
+    change(() => { S.map.shapes = (S.map.shapes || []).concat([s]); }, { noAuto: true });
+    selectShape(s.id);
+    openInspector(true);
+    D.toast('Funil inserido. Dê dois cliques dentro dele para escrever um texto.');
+  }
+
+  function updateShape(fn) {
+    const s = S.selShape && M.getShape(S.map, S.selShape);
+    if (!s) return;
+    change(() => fn(s), { noAuto: true });
+  }
+
+  function deleteShape() {
+    if (!S.selShape) return;
+    const id = S.selShape;
+    change(() => M.removeShape(S.map, id), { noAuto: true });
+    S.selShape = null;
+    render();
+  }
+
+  // ---------- estrutura do mapa ----------
+  const STRUCT_INFO = {
+    mind: { label: 'Mapa mental', icon: 'i-logo' },
+    flow: { label: 'Fluxo', icon: 'i-flow' },
+    org: { label: 'Organograma', icon: 'i-org' },
+  };
+  function setStructure(s) {
+    if (!S.map || M.structure(S.map) === s) return;
+    if (S.editing) commitEdit();
+    change(() => {
+      S.map.structure = s;
+      // fluxo e organograma ficam alinhados sozinhos (o ímã pode ser desligado para posicionar à mão)
+      if (s !== 'mind') { S.map.arrows = true; S.map.autoLayout = true; }
+      L.layoutAll(S.map, true);
+    }, { noAuto: true });
+    fitView();
+    D.toast('Estrutura: ' + STRUCT_INFO[s].label + '. Use Desfazer (Ctrl+Z) para voltar.');
   }
 
   // ---------- conexões livres (setas entre quaisquer tópicos) ----------
@@ -278,7 +369,10 @@
       if (value) n.edge[prop] = value; else delete n.edge[prop];
       const dx = L.edgeGap(S.map, id) - oldGap;
       // abre espaço para o rótulo sem reorganizar o resto do mapa
-      if (dx && !S.map.autoLayout) M.moveSubtree(S.map, id, M.side(S.map, id) * dx, 0);
+      if (dx && !S.map.autoLayout) {
+        const d = L.side(S.map, id) * dx;
+        if (L.axis(S.map).m === 'x') M.moveSubtree(S.map, id, d, 0); else M.moveSubtree(S.map, id, 0, d);
+      }
     });
   }
 
@@ -312,6 +406,8 @@
       n.image = { id: aid, size: (n.image && n.image.size) || 'M', ratio: U.clamp(img.ratio, 0.2, 5) };
     }));
     S.sel = id;
+    S.selShape = null;
+    S.selLink = null;
     render();
     if (Store.kind === 'localStorage') D.toast('Atenção: neste modo (arquivo aberto direto) o espaço para fotos é pequeno. Prefira abrir pelo endereço do app.');
   }
@@ -338,7 +434,8 @@
     const oldH = L.box(S.map, id).h;
     keepAnchor(id, mutate);
     if (S.map.autoLayout) return;
-    n.y += (L.box(S.map, id).h - oldH) / 2;
+    // no organograma a altura já é tratada por keepAnchor (eixo principal vertical)
+    if (L.axis(S.map).m === 'x') n.y += (L.box(S.map, id).h - oldH) / 2;
     L.makeRoom(S.map, id);
   }
 
@@ -372,6 +469,12 @@
     if (!S.map) return;
     if (S.editing) commitEdit();
     if (!S.sel || M.isRoot(S.map, S.sel)) return addChild();
+    if (M.isFree(S.map, S.sel)) {
+      // irmão de um tópico solto: outro tópico solto logo abaixo
+      const r = L.subtreeBBox(S.map, S.sel);
+      const n = S.map.nodes[S.sel];
+      return addFree({ x: n.x, y: r.y + r.h + 40 });
+    }
     const ref = S.sel;
     const p = S.map.nodes[S.map.nodes[ref].parent];
     const id = change(() => {
@@ -389,12 +492,13 @@
 
   function deleteSelected() {
     if (S.map && S.selLink) { deleteLink(); return; }
+    if (S.map && S.selShape) { deleteShape(); return; }
     if (!S.map || !S.sel) return;
     if (M.isRoot(S.map, S.sel)) { D.toast('O tópico central não pode ser excluído.'); return; }
     const n = S.map.nodes[S.sel];
     const p = S.map.nodes[n.parent];
-    const i = p.children.indexOf(n.id);
-    const next = p.children[i + 1] || p.children[i - 1] || p.id;
+    const i = p ? p.children.indexOf(n.id) : -1;
+    const next = p ? p.children[i + 1] || p.children[i - 1] || p.id : null;
     change(() => M.removeNode(S.map, n.id));
     S.sel = next;
     render();
@@ -403,7 +507,7 @@
   function toggleCollapse(id) {
     id = id || S.sel;
     const n = id && S.map.nodes[id];
-    if (!n || !n.children.length || !n.parent) return;
+    if (!n || !n.children.length || M.isRoot(S.map, id)) return;
     change(() => {
       n.collapsed = !n.collapsed;
       if (!n.collapsed && !S.map.autoLayout) L.makeRoom(S.map, id);
@@ -412,7 +516,7 @@
 
   function setAllCollapsed(collapsed) {
     change(() => {
-      for (const n of Object.values(S.map.nodes)) if (n.parent && n.children.length) n.collapsed = collapsed;
+      for (const n of Object.values(S.map.nodes)) if (n.id !== S.map.rootId && n.children.length) n.collapsed = collapsed;
       if (!collapsed && !S.map.autoLayout) L.layoutAll(S.map);
     });
   }
@@ -432,6 +536,17 @@
   function duplicateSelected() {
     if (!S.sel || M.isRoot(S.map, S.sel)) return;
     const ref = S.sel;
+    if (M.isFree(S.map, ref)) {
+      const id = change(() => {
+        const cid = M.cloneSubtree(S.map, ref, null);
+        const r = L.subtreeBBox(S.map, ref);
+        M.moveSubtree(S.map, cid, 0, r.h + 30);
+        return cid;
+      }, { noAuto: true });
+      S.sel = id;
+      render();
+      return;
+    }
     const id = change(() => {
       const p = S.map.nodes[S.map.nodes[ref].parent];
       const cid = M.cloneSubtree(S.map, ref, p.id);
@@ -474,19 +589,25 @@
    */
   function keepAnchor(id, mutate) {
     const map = S.map;
+    const A = L.axis(map);
     const n = map.nodes[id];
-    const oldW = L.box(map, id).w;
+    const old = L.box(map, id);
+    const oldM = old[A.ms], oldC = old[A.cs];
     mutate();
-    const newW = L.box(map, id).w;
-    const dw = (newW - oldW) / 2;
-    if (!dw) return;
-    if (M.isRoot(map, id)) {
-      for (const c of n.children) M.moveSubtree(map, c, map.nodes[c].x >= n.x ? dw : -dw, 0);
-    } else {
-      const side = M.side(map, id);
-      n.x += side * dw;
-      for (const c of n.children) M.moveSubtree(map, c, side * dw * 2, 0);
+    const nb = L.box(map, id);
+    const dm = (nb[A.ms] - oldM) / 2;
+    const shift = (sid, d) => M.moveSubtree(map, sid, A.m === 'x' ? d : 0, A.m === 'y' ? d : 0);
+    if (dm) {
+      if (!n.parent) {
+        for (const c of n.children) shift(c, L.side(map, c) * dm);
+      } else {
+        const side = L.side(map, id);
+        n[A.m] += side * dm;
+        for (const c of n.children) shift(c, side * dm * 2);
+      }
     }
+    // no organograma, ficar mais largo pode encostar no irmão ao lado
+    if (A.m === 'y' && nb[A.cs] > oldC && n.parent && !map.autoLayout) L.makeRoom(map, id);
   }
 
   function openLink(id) {
@@ -526,6 +647,8 @@
     const n = S.map.nodes[id];
     if (!n) return;
     S.sel = id;
+    S.selShape = null;
+    S.selLink = null;
     S.editing = { id, original: n.text, fresh: n.text === NEW_TEXT && selectAll };
     editor.value = initial != null ? initial : n.text;
     editor.hidden = false;
@@ -650,6 +773,23 @@
       if (linkEl) selectLink(id); else select(id);
       return;
     }
+    const shapeEl = !nodeEl && e.target.closest('[data-shape]');
+    if (shapeEl) {
+      const id = shapeEl.getAttribute('data-shape');
+      const s = M.getShape(S.map, id);
+      const resize = !!e.target.closest('[data-act="resize"]');
+      // o funil leva junto os tópicos que estão dentro dele
+      const carry = {};
+      if (!resize) {
+        for (const nid of M.visibleIds(S.map)) {
+          const n = S.map.nodes[nid];
+          if (M.inShape(s, n.x, n.y)) carry[nid] = [n.x, n.y];
+        }
+      }
+      S.shapeDrag = { id, sx: e.clientX, sy: e.clientY, start: { x: s.x, y: s.y, w: s.w, stageH: s.stageH }, carry, resize, moved: false, snap: null, pt: toWorld(e.clientX, e.clientY) };
+      if (S.selShape !== id) selectShape(id);
+      return;
+    }
     if (nodeEl) {
       const id = nodeEl.getAttribute('data-id');
       const actEl = e.target.closest('[data-act]');
@@ -677,6 +817,33 @@
       S.view.x = p.cx - r.left - S.pinch.w.x * k;
       S.view.y = p.cy - r.top - S.pinch.w.y * k;
       applyView();
+      return;
+    }
+
+    const sd = S.shapeDrag;
+    if (sd) {
+      const dx = e.clientX - sd.sx, dy = e.clientY - sd.sy;
+      if (!sd.moved) {
+        if (Math.hypot(dx, dy) < 5) return;
+        sd.moved = true;
+        sd.snap = M.snapshot(S.map);
+        svg.classList.add('dragging');
+      }
+      const s = M.getShape(S.map, sd.id);
+      if (!s) return;
+      const wdx = dx / S.view.k, wdy = dy / S.view.k;
+      if (sd.resize) {
+        s.w = U.clamp(sd.start.w + wdx * 2, 160, 6000);
+        s.stageH = U.clamp(sd.start.stageH + wdy / s.stages.length, 40, 2000);
+      } else {
+        s.x = sd.start.x + wdx;
+        s.y = sd.start.y + wdy;
+        for (const [nid, [x, y]] of Object.entries(sd.carry)) {
+          const n = S.map.nodes[nid];
+          if (n) { n.x = x + wdx; n.y = y + wdy; }
+        }
+      }
+      render();
       return;
     }
 
@@ -745,6 +912,27 @@
       if (S.pointers.size < 2) { S.pinch = null; saveViewSoon(); }
       return;
     }
+    const sd = S.shapeDrag;
+    if (sd) {
+      S.shapeDrag = null;
+      svg.classList.remove('dragging');
+      if (sd.moved) {
+        S.history.push(sd.snap);
+        persist();
+        render();
+        return;
+      }
+      if (e.type === 'pointercancel') return;
+      const now = performance.now();
+      const key = 'shape:' + sd.id;
+      if (S.lastTap.id === key && now - S.lastTap.t < 420) {
+        S.lastTap = { id: null, t: 0 };
+        addFree(sd.pt);
+      } else {
+        S.lastTap = { id: key, t: now };
+      }
+      return;
+    }
     if (S.tap) {
       const t = S.tap;
       S.tap = null;
@@ -778,8 +966,16 @@
     if (p) {
       S.pan = null;
       svg.classList.remove('panning');
-      if (p.moved) saveViewSoon();
-      else if (S.sel || S.selLink) select(null);
+      if (p.moved) { saveViewSoon(); return; }
+      if (S.sel || S.selLink || S.selShape) select(null);
+      // dois cliques no fundo: cria um texto solto ali
+      const now = performance.now();
+      if (e.type !== 'pointercancel' && S.lastTap.id === '__bg' && now - S.lastTap.t < 420) {
+        S.lastTap = { id: null, t: 0 };
+        addFree(toWorld(e.clientX, e.clientY));
+      } else {
+        S.lastTap = { id: '__bg', t: now };
+      }
     }
   }
   svg.addEventListener('pointerup', onPointerEnd);
@@ -856,6 +1052,7 @@
       else if (k === '0') { e.preventDefault(); fitView(); }
       else if (lk === 'l') { e.preventDefault(); layoutSelected(); }
       else if (lk === 'k') { e.preventDefault(); startConnect(); }
+      else if (lk === 'm') { e.preventDefault(); addFree(); }
       else if (lk === 'd') { e.preventDefault(); duplicateSelected(); }
       else if (lk === 'e') { e.preventDefault(); openExport(); }
       else if (lk === 'p') { e.preventDefault(); openExport(); }
@@ -877,7 +1074,7 @@
       case 'Delete': case 'Backspace': e.preventDefault(); deleteSelected(); return;
       case 'F2': e.preventDefault(); if (S.sel) startEdit(S.sel); return;
       case ' ': e.preventDefault(); if (S.sel) toggleCollapse(); return;
-      case 'Escape': if (S.sel || S.selLink) select(null); return;
+      case 'Escape': if (S.sel || S.selLink || S.selShape) select(null); return;
       case 'ArrowLeft': case 'ArrowRight': case 'ArrowUp': case 'ArrowDown': e.preventDefault(); navigate(k); return;
       case '+': case '=': zoomBy(1.2); return;
       case '-': zoomBy(1 / 1.2); return;
@@ -893,30 +1090,39 @@
     const sel = S.sel && S.map.nodes[S.sel];
     $('btnUndo').disabled = !S.history.canUndo();
     $('btnRedo').disabled = !S.history.canRedo();
-    $('btnDelete').disabled = !S.selLink && (!sel || !sel.parent);
+    $('btnDelete').disabled = !S.selLink && !S.selShape && (!sel || M.isRoot(S.map, sel.id));
+    const st = M.structure(S.map);
+    $('btnStructure').querySelector('use').setAttribute('href', '#' + STRUCT_INFO[st].icon);
+    $('btnStructure').title = 'Estrutura: ' + STRUCT_INFO[st].label;
+    for (const b of $('structMenu').querySelectorAll('[data-struct]')) b.setAttribute('aria-checked', String(b.getAttribute('data-struct') === st));
     $('btnConnect').disabled = !S.sel && !S.selLink && !S.connect;
     $('menuArrows').setAttribute('aria-checked', String(!!S.map.arrows));
     $('btnAuto').setAttribute('aria-pressed', S.map.autoLayout ? 'true' : 'false');
     if (document.activeElement !== $('mapName')) $('mapName').value = S.map.name;
   }
 
+  const MENUS = [['moreMenu', 'btnMore'], ['structMenu', 'btnStructure']];
   function closeMenus() {
-    const m = $('moreMenu');
-    if (!m.hidden) { m.hidden = true; $('btnMore').setAttribute('aria-expanded', 'false'); }
+    for (const [mid, bid] of MENUS) {
+      const m = $(mid);
+      if (!m.hidden) { m.hidden = true; $(bid).setAttribute('aria-expanded', 'false'); }
+    }
   }
 
-  function toggleMoreMenu() {
-    const m = $('moreMenu');
+  function toggleMenu(mid, bid) {
+    const m = $(mid);
     if (!m.hidden) { closeMenus(); return; }
+    closeMenus();
     m.hidden = false;
-    const r = $('btnMore').getBoundingClientRect();
+    const r = $(bid).getBoundingClientRect();
     const w = m.offsetWidth;
     m.style.top = (r.bottom + 6) + 'px';
-    m.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)) + 'px';
-    $('btnMore').setAttribute('aria-expanded', 'true');
-    const first = m.querySelector('button');
+    m.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, mid === 'moreMenu' ? r.right - w : r.left)) + 'px';
+    $(bid).setAttribute('aria-expanded', 'true');
+    const first = m.querySelector('[aria-checked="true"]') || m.querySelector('button');
     if (first) first.focus();
   }
+  const toggleMoreMenu = () => toggleMenu('moreMenu', 'btnMore');
 
   function bindToolbar() {
     $('btnMenu').addEventListener('click', openDrawer);
@@ -926,6 +1132,15 @@
     $('btnAddSibling').addEventListener('click', addSibling);
     $('btnDelete').addEventListener('click', deleteSelected);
     $('btnConnect').addEventListener('click', () => (S.connect ? endConnect() : startConnect()));
+    $('btnAddFree').addEventListener('click', () => addFree());
+    $('btnAddFunnel').addEventListener('click', addFunnel);
+    $('btnStructure').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu('structMenu', 'btnStructure'); });
+    $('structMenu').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-struct]');
+      if (!b) return;
+      closeMenus();
+      setStructure(b.getAttribute('data-struct'));
+    });
     $('btnLayout').addEventListener('click', layoutSelected);
     $('btnAuto').addEventListener('click', () => {
       const on = !S.map.autoLayout;
@@ -960,6 +1175,8 @@
         expandAll: () => setAllCollapsed(false),
         collapseAll: () => setAllCollapsed(true),
         layoutAll: layoutAll,
+        addFree: () => addFree(),
+        addFunnel: addFunnel,
         shortcuts: openShortcuts,
       })[cmd]();
     });
@@ -1089,6 +1306,43 @@
     $('iResetStyle').addEventListener('click', resetStyle);
     $('iDelete').addEventListener('click', deleteSelected);
     $('iConnect').addEventListener('click', startConnect);
+    $('iDetach').addEventListener('click', detachSelected);
+
+    // ---- funil selecionado ----
+    for (const b of $('shapeTaperSeg').children) b.addEventListener('click', () => updateShape((s) => { s.taper = Number(b.getAttribute('data-v')); }));
+    $('btnAddStage').addEventListener('click', () => updateShape((s) => {
+      if (s.stages.length >= M.LIMITS.stages) { D.toast('Limite de ' + M.LIMITS.stages + ' etapas.'); return false; }
+      s.stages.push({ label: 'Nova etapa', color: M.STAGE_COLORS[s.stages.length % M.STAGE_COLORS.length] });
+    }));
+    $('sAddFree').addEventListener('click', () => {
+      const s = S.selShape && M.getShape(S.map, S.selShape);
+      if (s) addFree({ x: s.x, y: s.y + s.stageH * 0.6 });
+    });
+    $('sDelete').addEventListener('click', deleteShape);
+    $('stageList').addEventListener('change', (e) => {
+      const row = e.target.closest('[data-i]');
+      if (!row) return;
+      const i = Number(row.getAttribute('data-i'));
+      if (e.target.type === 'color') updateShape((s) => { if (s.stages[i]) s.stages[i].color = e.target.value.toLowerCase(); });
+      else updateShape((s) => { if (s.stages[i]) s.stages[i].label = e.target.value.replace(/[\r\n]+/g, ' ').trim().slice(0, M.LIMITS.label); });
+    });
+    $('stageList').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.type === 'text') e.target.blur(); });
+    $('stageList').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-op]');
+      if (!b) return;
+      const i = Number(b.closest('[data-i]').getAttribute('data-i'));
+      const op = b.getAttribute('data-op');
+      updateShape((s) => {
+        if (op === 'del') {
+          if (s.stages.length <= 1) { D.toast('O funil precisa de pelo menos uma etapa.'); return false; }
+          s.stages.splice(i, 1);
+        } else {
+          const j = op === 'up' ? i - 1 : i + 1;
+          if (j < 0 || j >= s.stages.length) return false;
+          [s.stages[i], s.stages[j]] = [s.stages[j], s.stages[i]];
+        }
+      });
+    });
 
     // ---- elemento: emoji ou ícone ----
     for (const tab of $('elTabs').children) {
@@ -1171,13 +1425,42 @@
     pressSeg($('linkBendSeg'), String(l.bend || 0));
   }
 
+  function updateShapePanel(s) {
+    $('inspTitle').textContent = 'Funil';
+    pressSeg($('shapeTaperSeg'), String(s.taper));
+    const list = $('stageList');
+    const sig = s.id + ':' + s.stages.length;
+    if (list.getAttribute('data-sig') !== sig) {
+      list.setAttribute('data-sig', sig);
+      list.textContent = '';
+      s.stages.forEach((st, i) => {
+        list.appendChild(h('div', { class: 'stage-row', 'data-i': String(i) },
+          h('input', { type: 'color', 'aria-label': 'Cor da etapa ' + (i + 1) }),
+          h('input', { type: 'text', maxlength: '120', 'aria-label': 'Nome da etapa ' + (i + 1) }),
+          h('button', { class: 'btn icon sm', 'data-op': 'up', title: 'Subir', 'aria-label': 'Subir etapa', text: '↑' }),
+          h('button', { class: 'btn icon sm', 'data-op': 'down', title: 'Descer', 'aria-label': 'Descer etapa', text: '↓' }),
+          h('button', { class: 'btn icon sm danger', 'data-op': 'del', title: 'Remover etapa', 'aria-label': 'Remover etapa' }, U.icon('close'))));
+      });
+    }
+    [...list.children].forEach((row, i) => {
+      const st = s.stages[i];
+      const [col, txt] = row.querySelectorAll('input');
+      if (document.activeElement !== col) col.value = st.color;
+      if (document.activeElement !== txt) txt.value = st.label;
+      row.querySelector('[data-op="up"]').disabled = i === 0;
+      row.querySelector('[data-op="down"]').disabled = i === s.stages.length - 1;
+    });
+  }
+
   function updateInspector() {
     const l = S.selLink && M.getLink(S.map, S.selLink);
+    const sh = !l && S.selShape && M.getShape(S.map, S.selShape);
     $('inspLink').hidden = !l;
-    if (l) {
+    $('inspShape').hidden = !sh;
+    if (l || sh) {
       $('inspEmpty').hidden = true;
       $('inspBody').hidden = true;
-      updateLinkPanel(l);
+      if (l) updateLinkPanel(l); else updateShapePanel(sh);
       return;
     }
     const n = S.sel && S.map.nodes[S.sel];
@@ -1202,7 +1485,8 @@
     }
     const s = n.style;
     const t = L.typo(S.map, n.id);
-    $('inspTitle').textContent = n.parent ? 'Tópico' : 'Tópico central';
+    const isRoot = M.isRoot(S.map, n.id);
+    $('inspTitle').textContent = n.parent ? 'Tópico' : isRoot ? 'Tópico central' : 'Texto solto';
     for (const b of $('shapeGrid').children) b.setAttribute('aria-pressed', String((s.shape || '') === b.getAttribute('data-shape')));
     const box = L.box(S.map, n.id);
     const col = R.colors(S.map, n.id, theme(), box);
@@ -1222,7 +1506,7 @@
       if (document.activeElement !== inp && U.isHex(eff)) inp.value = eff;
     }
     // o tópico central não tem ramificação própria
-    document.querySelector('.swatches[data-prop="branch"]').parentElement.hidden = !n.parent;
+    document.querySelector('.swatches[data-prop="branch"]').parentElement.hidden = isRoot;
     if (document.activeElement !== $('fontSize')) $('fontSize').value = s.fontSize ? String(s.fontSize) : '';
     if (s.fontSize && !FONT_SIZES.includes(s.fontSize)) {
       const sel = $('fontSize');
@@ -1239,9 +1523,10 @@
     $('btnOpenLink').disabled = !n.link;
     $('iCollapse').querySelector('span').textContent = n.collapsed ? 'Expandir' : 'Recolher';
     $('iCollapse').querySelector('use').setAttribute('href', n.collapsed ? '#i-expand' : '#i-collapse');
-    $('iCollapse').disabled = !n.children.length || !n.parent;
-    $('iDelete').disabled = !n.parent;
-    $('iDuplicate').disabled = !n.parent;
+    $('iCollapse').disabled = !n.children.length || isRoot;
+    $('iDelete').disabled = isRoot;
+    $('iDuplicate').disabled = isRoot;
+    $('iDetach').hidden = !n.parent;
   }
 
   function openInspector(open) {
@@ -1328,16 +1613,58 @@
     }
   }
 
+  const TEMPLATES = [
+    ['mind', 'Mapa mental', 'Ideias a partir de um tópico central, para os dois lados.', 'i-logo'],
+    ['flow', 'Fluxo', 'Etapas em sequência, da esquerda para a direita, com setas.', 'i-flow'],
+    ['org', 'Organograma', 'Hierarquia de cima para baixo: equipes, cargos, áreas.', 'i-org'],
+    ['funnel', 'Funil de conteúdo', 'Etapas do funil com textos, ícones e setas livres.', 'i-funnel'],
+  ];
+
   async function newMap() {
-    const name = await D.prompt('Novo mapa', 'Novo mapa', { label: 'Nome do mapa', okLabel: 'Criar' });
-    if (!name) return;
-    const m = M.createMap(name, name);
+    let kind = 'mind';
+    const nameIn = h('input', { type: 'text', maxlength: '120', value: 'Novo mapa', 'aria-label': 'Nome do mapa' });
+    const sample = h('input', { type: 'checkbox' });
+    sample.checked = true;
+    const grid = h('div', { class: 'tpl-grid', role: 'radiogroup', 'aria-label': 'Modelo' });
+    for (const [k, label, desc, icon] of TEMPLATES) {
+      const b = h('button', { class: 'tpl', type: 'button', role: 'radio', 'aria-checked': String(k === kind), 'data-k': k },
+        U.icon(icon.slice(2)), h('strong', { text: label }), h('span', { text: desc }));
+      b.addEventListener('click', () => {
+        kind = k;
+        for (const x of grid.children) x.setAttribute('aria-checked', String(x === b));
+      });
+      b.addEventListener('dblclick', () => dlg.close('ok'));
+      grid.appendChild(b);
+    }
+    const body = h('div', null,
+      h('label', { class: 'field' }, h('span', { text: 'Nome do mapa' }), nameIn),
+      h('p', { class: 'small muted', text: 'Escolha a estrutura (dá para mudar depois pelo botão de estrutura na barra):' }),
+      grid,
+      h('label', { class: 'check' }, sample, 'Começar com conteúdo de exemplo'));
+    const dlg = D.open({
+      title: 'Novo mapa', body, wide: true,
+      actions: [{ label: 'Cancelar', value: null }, { label: 'Criar', value: 'ok', kind: 'primary' }],
+    });
+    nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); dlg.close('ok'); } });
+    setTimeout(() => { nameIn.focus(); nameIn.select(); }, 30);
+    if ((await dlg.result) !== 'ok') return;
+    const name = nameIn.value.trim().slice(0, M.LIMITS.name) || 'Novo mapa';
+    const m = MM.templateMap(kind, name, sample.checked);
     await addMaps([m]);
     openMap(m.id);
     closeDrawer();
-    S.view = { k: 1, x: svgRect().width / 2, y: svgRect().height / 2 };
-    applyView();
+    fitView();
+    if (S.view.k > 1) { S.view.k = 1; fitViewKeepZoom(); }
     select(m.rootId);
+  }
+
+  /** Centraliza o conteúdo sem mudar o zoom atual. */
+  function fitViewKeepZoom() {
+    const b = R.contentBBox(S.map);
+    const r = svgRect();
+    S.view.x = r.width / 2 - (b.x + b.w / 2) * S.view.k;
+    S.view.y = r.height / 2 - (b.y + b.h / 2) * S.view.k;
+    applyView();
   }
 
   async function renameMap(id) {
@@ -1664,6 +1991,7 @@
       ['Duplo clique / F2', 'Editar texto'], ['Digitar qualquer letra', 'Substituir texto do tópico'], ['Shift + Enter (editando)', 'Nova linha'],
       ['Esc', 'Cancelar edição / tirar seleção'], ['Espaço', 'Recolher / expandir'], ['Setas', 'Selecionar tópico vizinho'],
       ['Ctrl + Z', 'Desfazer'], ['Ctrl + Y / Ctrl + Shift + Z', 'Refazer'], ['Ctrl + D', 'Duplicar ramificação'],
+      ['Dois cliques no fundo', 'Criar texto solto naquele ponto'], ['Ctrl + M', 'Novo texto solto'],
       ['Ctrl + L', 'Reorganizar ramificação'], ['Ctrl + K', 'Conectar a outro tópico com uma seta'], ['Ctrl + V', 'Colar foto no tópico selecionado'], ['Duplo clique na seta', 'Escrever rótulo da seta'], ['Ctrl + 0', 'Centralizar mapa'], ['+ / −  ou roda do mouse', 'Zoom'],
       ['Shift + roda', 'Mover na horizontal'], ['Arrastar o fundo', 'Mover a tela'], ['Arrastar tópico sobre outro', 'Mudar de pai'],
       ['Ctrl + E', 'Exportar PDF / PNG'], ['Ctrl + S', 'Salvar agora (o salvamento já é automático)'], ['Ctrl + O', 'Meus mapas'],
@@ -1694,10 +2022,17 @@
       await addMaps(MM.demoMaps());
       await Store.setMeta('seeded', true);
       await Store.setMeta('seededFlow', true);
-    } else if (!(await Store.getMeta('seededFlow', false))) {
-      // quem já usava o app recebe uma vez o novo exemplo de fluxo comercial
-      await addMaps(MM.demoMaps().filter((m) => m.name === 'Fluxo comercial'));
-      await Store.setMeta('seededFlow', true);
+      await Store.setMeta('seededFunnel', true);
+    } else {
+      // quem já usava o app recebe uma vez cada exemplo novo
+      if (!(await Store.getMeta('seededFlow', false))) {
+        await addMaps(MM.demoMaps().filter((m) => m.name === 'Fluxo comercial'));
+        await Store.setMeta('seededFlow', true);
+      }
+      if (!(await Store.getMeta('seededFunnel', false))) {
+        await addMaps(MM.demoMaps().filter((m) => m.name === 'Funil de conteúdo'));
+        await Store.setMeta('seededFunnel', true);
+      }
     }
     if (!S.maps.length) await addMaps([M.createMap('Novo mapa', 'Tópico central')]);
     const last = await Store.getMeta('lastMap', null);
@@ -1715,7 +2050,7 @@
   }
 
   // API para testes automatizados e depuração
-  MM.app = { S, attachImage, setImage, startConnect, finishConnect, selectLink, setElement, setEdge, setLink, deleteLink, addChild, addSibling, deleteSelected, undo, redo, select, startEdit, commitEdit, toggleCollapse, layoutSelected, fitView, openMap, createBackup, restoreBackup, openExport, setTheme, renderNow };
+  MM.app = { S, addFree, addFunnel, setStructure, selectShape, deleteShape, updateShape, detachSelected, newMap, attachImage, setImage, startConnect, finishConnect, selectLink, setElement, setEdge, setLink, deleteLink, addChild, addSibling, deleteSelected, undo, redo, select, startEdit, commitEdit, toggleCollapse, layoutSelected, fitView, openMap, createBackup, restoreBackup, openExport, setTheme, renderNow };
 
   init().catch((e) => {
     console.error(e);

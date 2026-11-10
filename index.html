@@ -48,6 +48,10 @@
     <symbol id="i-photo" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 8.5"/></symbol>
     <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15M14 7l5 5-5 5"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-text" viewBox="0 0 24 24"><path d="M5 7V4.5h14V7M12 4.5v15M9 19.5h6"/></symbol>
+    <symbol id="i-funnel" viewBox="0 0 24 24"><path d="M3 4h18l-2.6 4.5H5.6zM6.5 10.5h11l-2.6 4.5H9.1zM10.2 17h3.6l-1.8 3z"/></symbol>
+    <symbol id="i-flow" viewBox="0 0 24 24"><rect x="2" y="9" width="5.5" height="6" rx="1.5"/><rect x="16.5" y="3.5" width="5.5" height="6" rx="1.5"/><rect x="16.5" y="14.5" width="5.5" height="6" rx="1.5"/><path d="M7.5 12h4.5M12 6.5v11M12 6.5h2.5M12 17.5h2.5"/></symbol>
+    <symbol id="i-org" viewBox="0 0 24 24"><rect x="8.5" y="2.5" width="7" height="5.5" rx="1.5"/><rect x="2.5" y="16" width="7" height="5.5" rx="1.5"/><rect x="14.5" y="16" width="7" height="5.5" rx="1.5"/><path d="M12 8v4M6 16v-4h12v4"/></symbol>
     <symbol id="i-logo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><circle cx="4.5" cy="6" r="1.8"/><circle cx="19.5" cy="6" r="1.8"/><circle cx="4.5" cy="18" r="1.8"/><circle cx="19.5" cy="18" r="1.8"/><path d="M9.4 10.2L6 7.2M14.6 10.2l3.4-3M9.4 13.8L6 16.8M14.6 13.8l3.4 3"/></symbol>
   </defs>
 </svg>
@@ -66,10 +70,21 @@
     <div class="tb-group">
       <button class="btn icon" id="btnAddChild" title="Novo subtópico (Tab)" aria-label="Novo subtópico"><svg class="ic"><use href="#i-child"/></svg></button>
       <button class="btn icon" id="btnAddSibling" title="Novo tópico irmão (Enter)" aria-label="Novo tópico irmão"><svg class="ic"><use href="#i-sibling"/></svg></button>
+      <button class="btn icon" id="btnAddFree" title="Texto solto em qualquer lugar (Ctrl+M ou dois cliques no fundo)" aria-label="Texto solto"><svg class="ic"><use href="#i-text"/></svg></button>
       <button class="btn icon" id="btnConnect" title="Conectar a outro tópico com uma seta (Ctrl+K)" aria-label="Conectar tópicos"><svg class="ic"><use href="#i-connect"/></svg></button>
       <button class="btn icon" id="btnDelete" title="Excluir (Delete)" aria-label="Excluir"><svg class="ic"><use href="#i-trash"/></svg></button>
     </div>
     <div class="tb-group">
+      <div class="menu-wrap">
+        <button class="btn icon" id="btnStructure" title="Estrutura do mapa" aria-label="Estrutura do mapa" aria-haspopup="menu" aria-expanded="false"><svg class="ic"><use href="#i-logo"/></svg></button>
+        <div class="menu" id="structMenu" role="menu" hidden>
+          <div class="menu-title">Estrutura do mapa</div>
+          <button role="menuitemradio" data-struct="mind" aria-checked="false"><svg class="ic"><use href="#i-logo"/></svg><span>Mapa mental<small>Ideias para os dois lados</small></span><svg class="ic check"><use href="#i-check"/></svg></button>
+          <button role="menuitemradio" data-struct="flow" aria-checked="false"><svg class="ic"><use href="#i-flow"/></svg><span>Fluxo<small>Etapas da esquerda para a direita</small></span><svg class="ic check"><use href="#i-check"/></svg></button>
+          <button role="menuitemradio" data-struct="org" aria-checked="false"><svg class="ic"><use href="#i-org"/></svg><span>Organograma<small>Hierarquia de cima para baixo</small></span><svg class="ic check"><use href="#i-check"/></svg></button>
+        </div>
+      </div>
+      <button class="btn icon" id="btnAddFunnel" title="Inserir funil" aria-label="Inserir funil"><svg class="ic"><use href="#i-funnel"/></svg></button>
       <button class="btn icon" id="btnLayout" title="Reorganizar tópico selecionado e subtópicos (Ctrl+L)" aria-label="Reorganizar"><svg class="ic"><use href="#i-layout"/></svg></button>
       <button class="btn icon toggle-btn" id="btnAuto" title="Organização automática" aria-label="Organização automática" aria-pressed="false"><svg class="ic"><use href="#i-magnet"/></svg></button>
     </div>
@@ -97,6 +112,9 @@
           <button role="menuitem" data-cmd="expandAll"><svg class="ic"><use href="#i-expand"/></svg>Expandir tudo</button>
           <button role="menuitem" data-cmd="collapseAll"><svg class="ic"><use href="#i-collapse"/></svg>Recolher tudo</button>
           <button role="menuitem" data-cmd="layoutAll"><svg class="ic"><use href="#i-layout"/></svg>Reorganizar mapa inteiro</button>
+          <hr>
+          <button role="menuitem" data-cmd="addFree"><svg class="ic"><use href="#i-text"/></svg>Inserir texto solto</button>
+          <button role="menuitem" data-cmd="addFunnel"><svg class="ic"><use href="#i-funnel"/></svg>Inserir funil</button>
           <hr>
           <button role="menuitem" data-cmd="shortcuts"><svg class="ic"><use href="#i-keyboard"/></svg>Atalhos de teclado</button>
         </div>
@@ -138,7 +156,27 @@
       </div>
       <div id="inspEmpty" class="insp-empty">
         <p>Selecione um tópico para alterar forma, cores, texto, notas e links.</p>
-        <p class="muted small">Dica: clique duas vezes num tópico para editar o texto.</p>
+        <p class="muted small">Dica: clique duas vezes num tópico para editar o texto. Dois cliques no fundo criam um texto solto.</p>
+      </div>
+      <div id="inspShape" class="insp-body" hidden>
+        <section>
+          <h3>Formato</h3>
+          <div class="segmented" id="shapeTaperSeg">
+            <button class="btn seg" data-v="0.32">Funil</button>
+            <button class="btn seg" data-v="0.6">Suave</button>
+            <button class="btn seg" data-v="1">Faixas retas</button>
+          </div>
+        </section>
+        <section>
+          <h3>Etapas</h3>
+          <div id="stageList" class="stage-list"></div>
+          <button class="btn outline" id="btnAddStage"><svg class="ic"><use href="#i-plus"/></svg>Adicionar etapa</button>
+          <p class="muted small">Arraste o funil para movê-lo junto com os tópicos que estão dentro dele. A bolinha no canto muda o tamanho. Dois cliques dentro do funil criam um texto ali.</p>
+        </section>
+        <section class="insp-actions">
+          <button class="btn" id="sAddFree"><svg class="ic"><use href="#i-text"/></svg>Texto no funil</button>
+          <button class="btn danger" id="sDelete"><svg class="ic"><use href="#i-trash"/></svg>Excluir funil</button>
+        </section>
       </div>
       <div id="inspLink" class="insp-body" hidden>
         <section>
@@ -267,6 +305,7 @@
           <button class="btn" id="iAddSibling"><svg class="ic"><use href="#i-sibling"/></svg>Irmão</button>
           <button class="btn" id="iCollapse"><svg class="ic"><use href="#i-collapse"/></svg><span>Recolher</span></button>
           <button class="btn" id="iConnect"><svg class="ic"><use href="#i-connect"/></svg>Conectar</button>
+          <button class="btn" id="iDetach" title="Desliga este tópico do pai; ele fica solto onde está"><svg class="ic"><use href="#i-text"/></svg>Soltar</button>
           <button class="btn" id="iLayout"><svg class="ic"><use href="#i-layout"/></svg>Reorganizar</button>
           <button class="btn" id="iDuplicate"><svg class="ic"><use href="#i-copy"/></svg>Duplicar</button>
           <button class="btn" id="iResetStyle"><svg class="ic"><use href="#i-palette"/></svg>Limpar estilo</button>

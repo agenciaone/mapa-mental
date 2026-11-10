@@ -3,10 +3,12 @@
   const { M, L, R } = MM;
 
   function build(name, spec) {
-    const map = M.createMap(name, spec.t);
+    const map = M.createMap(name, spec.t, spec.structure);
     const root = map.nodes[map.rootId];
     Object.assign(root, { note: spec.note || '', style: spec.style || {}, icon: spec.icon || '', emoji: spec.emoji || '' });
     map.arrows = !!spec.arrows;
+    map.autoLayout = !!spec.autoLayout;
+    if (spec.rootAt) { root.x = spec.rootAt[0]; root.y = spec.rootAt[1]; }
     const byText = { [spec.t]: root.id };
     const add = (parentId, s, depth) => {
       const n = M.addChild(map, parentId, s.t);
@@ -24,12 +26,78 @@
     (spec.kids || []).forEach((k) => add(map.rootId, k, 1));
     if (spec.oneSide) for (const c of root.children) map.nodes[c].x = root.x + 1;
     L.layoutAll(map, false);
-    for (const [a, b, label] of spec.links || []) {
+    if (spec.funnel) map.shapes.push(Object.assign(M.newFunnel(0, 0, spec.funnel.labels), spec.funnel.props || {}));
+    (spec.free || []).forEach((s, i) => {
+      const n = M.addFree(map, s.t, s.x, s.y);
+      byText[s.t] = n.id;
+      n.icon = s.icon || '';
+      n.emoji = s.emoji || '';
+      n.note = s.note || '';
+      n.style = Object.assign({ branch: s.color || '#495057' }, s.style || {});
+      void i;
+    });
+    for (const [a, b, label, opts] of spec.links || []) {
       const l = M.addLink(map, byText[a], byText[b]);
-      if (l) l.label = label || '';
+      if (l) Object.assign(l, { label: label || '' }, opts || {});
     }
     return map;
   }
+
+  // ---------- modelos para "Novo mapa" ----------
+  const FUNNEL_STAGES = ['Topo · Descoberta', 'Meio · Consideração', 'Fundo · Decisão', 'Pós-venda · Fidelização'];
+  const STAGE = MM.M.STAGE_COLORS;
+
+  function funnelSpec(title, sample) {
+    // funil de 760 × 4 etapas de 150; textos posicionados dentro de cada faixa
+    const y = (i) => i * 150 + 92;
+    return {
+      t: title, rootAt: [0, -70], style: { fontSize: 22 },
+      note: 'Arraste textos e ícones para dentro das etapas do funil. Dê dois cliques dentro do funil (ou no fundo) para criar um texto. Use "Conectar" (Ctrl+K) para ligar os conteúdos com setas.',
+      funnel: { labels: FUNNEL_STAGES, props: { w: 760, stageH: 150, taper: 0.32 } },
+      free: sample ? [
+        { t: 'Reels e TikTok', icon: 'tiktok', x: -205, y: y(0), color: STAGE[0] },
+        { t: 'Blog e SEO', icon: 'busca', x: 0, y: y(0), color: STAGE[0] },
+        { t: 'Anúncios', icon: 'anuncio', x: 195, y: y(0), color: STAGE[0] },
+        { t: 'Carrossel educativo', icon: 'apresentacao', x: -140, y: y(1), color: STAGE[1] },
+        { t: 'E-mail de nutrição', icon: 'email', x: 140, y: y(1), color: STAGE[1] },
+        { t: 'Depoimentos', icon: 'estrela', x: -100, y: y(2), color: STAGE[2] },
+        { t: 'WhatsApp', icon: 'whatsapp', x: 100, y: y(2), color: STAGE[2] },
+        { t: 'Comunidade', icon: 'equipe', x: 0, y: y(3), color: STAGE[3] },
+      ] : [],
+      links: sample ? [
+        ['Reels e TikTok', 'Carrossel educativo', 'seguiu', { line: 'solid' }],
+        ['Blog e SEO', 'E-mail de nutrição', 'baixou e-book', { line: 'solid' }],
+        ['Anúncios', 'E-mail de nutrição', '', { line: 'solid' }],
+        ['Carrossel educativo', 'Depoimentos', '', { line: 'solid' }],
+        ['E-mail de nutrição', 'WhatsApp', 'clicou na oferta', { line: 'solid' }],
+        ['WhatsApp', 'Comunidade', 'comprou', { line: 'solid' }],
+      ] : [],
+    };
+  }
+
+  MM.templateMap = function (kind, name, sample) {
+    if (kind === 'flow') {
+      return build(name, {
+        t: sample ? 'Ideia' : 'Início', icon: sample ? 'ideia' : 'alvo', structure: 'flow', arrows: true, autoLayout: true,
+        kids: sample ? [{ t: 'Roteiro', icon: 'proposta', kids: [{ t: 'Gravação', icon: 'evento', kids: [{ t: 'Edição', icon: 'config', kids: [
+          { t: 'Publicação', icon: 'foguete', edge: 'aprovado', kids: [{ t: 'Análise de métricas', icon: 'grafico' }] },
+          { t: 'Ajustes', icon: 'alerta', edge: 'reprovado' },
+        ] }] }] }] : [{ t: 'Etapa 1' }],
+      });
+    }
+    if (kind === 'org') {
+      return build(name, {
+        t: sample ? 'Diretoria' : 'Diretoria', structure: 'org', autoLayout: true,
+        kids: sample ? [
+          { t: 'Marketing', icon: 'anuncio', kids: [{ t: 'Conteúdo' }, { t: 'Tráfego pago' }, { t: 'Design' }] },
+          { t: 'Comercial', icon: 'lead', kids: [{ t: 'Pré-vendas' }, { t: 'Vendas' }] },
+          { t: 'Operações', icon: 'config', kids: [{ t: 'Atendimento' }, { t: 'Financeiro' }] },
+        ] : [{ t: 'Área 1' }, { t: 'Área 2' }],
+      });
+    }
+    if (kind === 'funnel') return build(name, funnelSpec(name, sample));
+    return M.createMap(name, name);
+  };
 
   MM.demoMaps = function () {
     const guide = build('Guia rápido', {
@@ -124,8 +192,10 @@
         ['E-mail', 'Proposta', 'pediu orçamento'],
       ],
     });
+    const funnel = build('Funil de conteúdo', funnelSpec('Estratégia de conteúdo', true));
     project.updated -= 1000; // o guia aparece primeiro
     flow.updated -= 500;
-    return [guide, flow, project];
+    funnel.updated -= 250;
+    return [guide, funnel, flow, project];
   };
 })(window.MM);
