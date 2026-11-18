@@ -1574,7 +1574,7 @@
   }
 
   async function updateStorageInfo() {
-    let txt = `${S.maps.length} ${S.maps.length === 1 ? 'mapa salvo' : 'mapas salvos'} neste dispositivo (${Store.kind}).`;
+    let txt = `Versão ${M.APP_VERSION}. ${S.maps.length} ${S.maps.length === 1 ? 'mapa salvo' : 'mapas salvos'} neste dispositivo (${Store.kind}).`;
     try {
       if (navigator.storage && navigator.storage.estimate) {
         const est = await navigator.storage.estimate();
@@ -1732,11 +1732,17 @@
       D.toast('Não foi possível importar: ' + e.message, 'error');
       return;
     }
+    if (data.fileVersion > M.VERSION) {
+      // arquivo feito numa versão mais nova do app: esta versão perderia o que não conhece
+      const go = await D.confirm('Este arquivo foi criado numa versão mais nova do app. Esta cópia está desatualizada e pode deixar de fora partes do mapa. Recarregue a página (com internet) e importe de novo.',
+        { title: 'App desatualizado', okLabel: 'Importar assim mesmo' });
+      if (!go) return;
+    }
     if (data.kind === 'map') {
       await addMaps(data.maps);
       openMap(data.maps[0].id);
       closeDrawer();
-      D.toast(`Mapa "${data.maps[0].name}" importado`);
+      D.toast(`Mapa "${data.maps[0].name}" importado: ${M.summary(data.maps[0])}.`);
       return;
     }
     const choice = await D.open({
@@ -2045,7 +2051,19 @@
     document.addEventListener('visibilitychange', () => { if (document.hidden) saveSoon.flush(); });
 
     if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
-      navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service worker não registrado', e));
+      // quando uma versão nova do app é instalada, recarrega uma vez para usá-la
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController || reloading) return;
+        reloading = true;
+        if (S.editing) commitEdit();
+        saveSoon.flush();
+        saveNow().finally(() => location.reload());
+      });
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+        .then((reg) => reg.update().catch(() => {}))
+        .catch((e) => console.warn('Service worker não registrado', e));
     }
   }
 

@@ -5,7 +5,9 @@
 
   M.FORMAT = 'mapa-mental';
   M.BACKUP_FORMAT = 'mapa-mental-backup';
-  M.VERSION = 1;
+  // VERSION: formato do arquivo (2 = estruturas, textos soltos e funil). APP_VERSION: versão do app.
+  M.VERSION = 2;
+  M.APP_VERSION = '2026.11.18';
   M.SHAPES = ['rounded', 'rect', 'pill', 'ellipse', 'hexagon', 'underline', 'none'];
   M.BORDERS = ['solid', 'dashed', 'dotted', 'none'];
   M.LIMITS = { text: 2000, note: 20000, name: 120, nodes: 5000, links: 2000, label: 120, emoji: 16, shapes: 200, stages: 12 };
@@ -397,15 +399,32 @@
   M.parseImport = function (text) {
     let data;
     try { data = JSON.parse(text); } catch (e) { throw new Error('O arquivo não é um JSON válido.'); }
+    const fileVersion = data && typeof data.version === 'number' ? data.version : 1;
     if (data && data.format === M.BACKUP_FORMAT && Array.isArray(data.maps)) {
-      return { kind: 'backup', created: num(data.created, Date.now()), label: str(data.label, 120), maps: data.maps.map(M.sanitizeMap) };
+      return { kind: 'backup', fileVersion, created: num(data.created, Date.now()), label: str(data.label, 120), maps: data.maps.map(M.sanitizeMap) };
     }
-    if (data && data.format === M.FORMAT && data.map) return { kind: 'map', maps: [M.sanitizeMap(data.map)] };
+    if (data && data.format === M.FORMAT && data.map) return { kind: 'map', fileVersion, maps: [M.sanitizeMap(data.map)] };
     if (data && data.nodes) return { kind: 'map', maps: [M.sanitizeMap(data)] };
     throw new Error('Formato de arquivo não reconhecido.');
   };
 
-  M.exportObject = (map) => ({ format: M.FORMAT, version: M.VERSION, exported: new Date().toISOString(), map });
+  M.exportObject = (map) => ({ format: M.FORMAT, version: M.VERSION, app: M.APP_VERSION, exported: new Date().toISOString(), map });
+
+  /** Resumo do conteúdo, para confirmar o que veio numa importação. */
+  M.summary = function (map) {
+    const nodes = Object.values(map.nodes);
+    const plural = (n, a, b) => `${n} ${n === 1 ? a : b}`;
+    const parts = [plural(nodes.length, 'tópico', 'tópicos')];
+    const photos = nodes.filter((n) => n.image).length;
+    const links = (map.links || []).length;
+    const shapes = (map.shapes || []).length;
+    const free = M.roots(map).length - 1;
+    if (photos) parts.push(plural(photos, 'foto', 'fotos'));
+    if (links) parts.push(plural(links, 'seta livre', 'setas livres'));
+    if (free) parts.push(plural(free, 'texto solto', 'textos soltos'));
+    if (shapes) parts.push(plural(shapes, 'funil', 'funis'));
+    return parts.join(', ');
+  };
 
   MM.M = M;
 })(window.MM);

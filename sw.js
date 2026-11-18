@@ -1,6 +1,6 @@
 'use strict';
 // Service worker: guarda todos os arquivos do app para uso sem internet.
-const CACHE = 'mapas-mentais-v4';
+const CACHE = 'mapas-mentais-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -37,21 +37,21 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
-  // Responde do cache na hora e atualiza o cache em segundo plano quando houver rede.
-  e.respondWith(
-    caches.match(req, { ignoreSearch: true }).then((hit) => {
-      const net = fetch(req).then((res) => {
-        if (res.ok && res.type === 'basic') {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy));
-        }
-        return res;
-      });
-      if (hit) {
-        e.waitUntil(net.catch(() => {}));
-        return hit;
-      }
-      return net.catch(() => (req.mode === 'navigate' ? caches.match('./index.html') : Response.error()));
-    })
-  );
+  // Rede primeiro: com internet, sempre a versão mais nova do app (evita abrir uma versão
+  // antiga que não conhece recursos novos). Sem internet ou rede lenta, usa o cache.
+  e.respondWith((async () => {
+    const cache = await caches.open(CACHE);
+    const fromCache = () => cache.match(req, { ignoreSearch: true })
+      .then((hit) => hit || (req.mode === 'navigate' ? cache.match('./index.html') : Response.error()));
+    try {
+      const res = await Promise.race([
+        fetch(req, { cache: 'no-cache' }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000)),
+      ]);
+      if (res.ok && res.type === 'basic') cache.put(req, res.clone()).catch(() => {});
+      return res;
+    } catch (err) {
+      return fromCache();
+    }
+  })());
 });
